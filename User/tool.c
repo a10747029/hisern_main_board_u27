@@ -802,6 +802,43 @@ void periodic_battery_report(void)
     int val_vol          = BQ40Z50_Read_Vol();
     int val_curr         = BQ40Z50_Read_Current();
 
+    /* ----------------- 根据 0x16 充电状态控制电池灯 ----------------- */
+    /* 静态变量记录上一次灯的开关状态，用于闪烁 */
+    static uint8_t s_bat_led_on = 0;
+
+    /* 这里示例：
+     *   假设 val_chg_status 的 bit4 表示“正在充电”，bit5 表示“已充满”。
+     *   你可以按实际 BQ40Z50 的状态位定义修改下面两个宏。
+     */
+    #define CHG_STATUS_CHARGING_MASK   (1 << 4)
+    #define CHG_STATUS_FULL_MASK       (1 << 5)
+
+    if (val_chg_status >= 0) {
+        uint16_t chg_raw = (uint16_t)val_chg_status;
+
+        if (chg_raw & CHG_STATUS_CHARGING_MASK) {
+            /* 充电中：闪烁灯 */
+            s_bat_led_on = !s_bat_led_on;
+            if (s_bat_led_on) {
+                gpio_bit_set(GPIOC, GPIO_PIN_13);   /* 灯亮 */
+            } else {
+                gpio_bit_reset(GPIOC, GPIO_PIN_13); /* 灯灭 */
+            }
+        } else if (chg_raw & CHG_STATUS_FULL_MASK) {
+            /* 充满：常亮灯 */
+            s_bat_led_on = 1;
+            gpio_bit_set(GPIOC, GPIO_PIN_13);
+        } else {
+            /* 其它状态：灭灯，避免误亮 */
+            s_bat_led_on = 0;
+            gpio_bit_reset(GPIOC, GPIO_PIN_13);
+        }
+    } else {
+        /* 读取失败时，关灯防止误判 */
+        s_bat_led_on = 0;
+        gpio_bit_reset(GPIOC, GPIO_PIN_13);
+    }
+
     /* 有效数据长度（子命令 + 9*2 字节） */
     const uint16_t payload_len = 1 + 18;
     /* Type(1) + Data(1+18) + Len(2) */
