@@ -672,3 +672,198 @@ int BQ40Z50_Read_Current(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0A);
 }
+
+/* ========================= 周期上报（新协议 AA AA AA） ========================= */
+/*
+ * 协议格式：
+ *   Header : 0xAA 0xAA 0xAA
+ *   Len    : 2 字节，大端，高字节在前，值 = Type(1) + DataLen(1+N) + Len字段本身(2)
+ *   Type   : 0xFE
+ *   Data   : [SubCmd(1)] + Payload(N)
+ *   CRC    : 1 字节，普通累加取低 8 位（从 Len 高字节到 Data 最后一字节）
+ *   Tail   : 0xFF 0xFF 0xFF
+ */
+
+extern uint8_t adc_value[20];
+
+/* ----------- 普通累加 CRC 计算（仅用于新协议） ----------- */
+static uint8_t calc_add_crc(uint8_t *data, uint16_t length)
+{
+    uint32_t sum = 0;
+    uint16_t i;
+
+    for (i = 0; i < length; i++) {
+        sum += data[i];
+    }
+
+    return (uint8_t)(sum & 0xFF);
+}
+
+/* ----------- 20 路 ADC 周期上报，子命令 0x80 ----------- */
+/* 数据体 = [0x80] + 20 字节 adc_value */
+void periodic_adc_report(void)
+{
+    uint8_t buf[64];  /* 足够容纳本帧 */
+    uint16_t idx = 0;
+    uint16_t len_field;      /* 协议中的长度值 */
+    uint8_t  len_hi, len_lo;
+    uint8_t  crc;
+    uint16_t crc_start_index;
+    uint16_t crc_len;
+    uint8_t  i;
+
+    /* 有效数据长度（子命令 + 20 字节 ADC） */
+    const uint16_t payload_len = 1 + 20;
+    /* Type(1) + Data(1+20) + Len(2) */
+    len_field = 1 + payload_len + 2;
+    len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
+    len_lo    = (uint8_t)(len_field & 0xFF);
+
+    /* Header */
+    buf[idx++] = 0xAA;
+    buf[idx++] = 0xAA;
+    buf[idx++] = 0xAA;
+
+    /* Length (2B, big endian) */
+    buf[idx++] = len_hi;
+    buf[idx++] = len_lo;
+
+    /* Type */
+    buf[idx++] = 0xFE;
+
+    /* Data: SubCmd */
+    buf[idx++] = 0x80;
+
+    /* Data: Payload (20 bytes ADC) */
+    for (i = 0; i < 20; i++) {
+        buf[idx++] = adc_value[i];
+    }
+
+    /* 计算 CRC：从 len_hi 开始到最后一个数据字节 */
+    crc_start_index = 3; /* buf[3] = len_hi */
+    crc_len         = idx - crc_start_index;
+    crc             = calc_add_crc(&buf[crc_start_index], crc_len);
+
+    /* CRC */
+    buf[idx++] = crc;
+
+    /* Tail */
+    buf[idx++] = 0xFF;
+    buf[idx++] = 0xFF;
+    buf[idx++] = 0xFF;
+
+    /* 通过 USART0 发送 */
+    usart_transmit(USART0, buf, (uint8_t)idx);
+}
+
+/* ----------- 电池信息周期上报，子命令 0x81 ----------- */
+/*
+ * 需要实时读取 9 个寄存器，每个 2 字节（大端在前）：
+ *   1) 0x17 Cycle Count
+ *   2) 0x10 Full Charge Capacity
+ *   3) 0x18 Design Capacity
+ *   4) 0x0F Remaining Capacity
+ *   5) 0x16 Charging Status
+ *   6) 0x13 Time to Full
+ *   7) 0x08 Temp
+ *   8) 0x09 Voltage
+ *   9) 0x0A Current
+ * 共 9 * 2 = 18 字节，有效数据 = [子命令(1)] + 18 字节 = 19 字节
+ */
+
+int BQ40Z50_Read_CycleCount(void);
+int BQ40Z50_Read_FullChargeCapacity(void);
+int BQ40Z50_Read_DesignCapacity(void);
+int BQ40Z50_Read_RemainingCapacity(void);
+int BQ40Z50_Read_ChargingStatus(void);
+int BQ40Z50_Read_TimeToFull(void);
+int BQ40Z50_Read_Temp(void);
+int BQ40Z50_Read_Vol(void);
+int BQ40Z50_Read_Current(void);
+
+void periodic_battery_report(void)
+{
+    uint8_t buf[96];   /* 足够容纳本帧 */
+    uint16_t idx = 0;
+    uint16_t len_field;
+    uint8_t  len_hi, len_lo;
+    uint8_t  crc;
+    uint16_t crc_start_index;
+    uint16_t crc_len;
+
+    /* 9 个 16bit 数，按大端顺序输出 */
+    int val_cycle        = BQ40Z50_Read_CycleCount();
+    int val_full_cap     = BQ40Z50_Read_FullChargeCapacity();
+    int val_design_cap   = BQ40Z50_Read_DesignCapacity();
+    int val_remaining    = BQ40Z50_Read_RemainingCapacity();
+    int val_chg_status   = BQ40Z50_Read_ChargingStatus();
+    int val_time_to_full = BQ40Z50_Read_TimeToFull();
+    int val_temp         = BQ40Z50_Read_Temp();
+    int val_vol          = BQ40Z50_Read_Vol();
+    int val_curr         = BQ40Z50_Read_Current();
+
+    /* 有效数据长度（子命令 + 9*2 字节） */
+    const uint16_t payload_len = 1 + 18;
+    /* Type(1) + Data(1+18) + Len(2) */
+    len_field = 1 + payload_len + 2;
+    len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
+    len_lo    = (uint8_t)(len_field & 0xFF);
+
+    /* Header */
+    buf[idx++] = 0xAA;
+    buf[idx++] = 0xAA;
+    buf[idx++] = 0xAA;
+
+    /* Length (big endian) */
+    buf[idx++] = len_hi;
+    buf[idx++] = len_lo;
+
+    /* Type */
+    buf[idx++] = 0xFE;
+
+    /* Data: SubCmd */
+    buf[idx++] = 0x81;
+
+    /* 一个小宏，方便以大端写入 16bit 值。
+     * 如果读取失败返回 -1，则填 0xFFFF 占位。
+     */
+#define PUT_16BE_FROM_VAL(v)                 \
+    do {                                     \
+        uint16_t _u16;                       \
+        if ((v) < 0) {                       \
+            _u16 = 0xFFFF;                   \
+        } else {                             \
+            _u16 = (uint16_t)(v);            \
+        }                                    \
+        buf[idx++] = (uint8_t)((_u16 >> 8) & 0xFF); \
+        buf[idx++] = (uint8_t)(_u16 & 0xFF);        \
+    } while (0)
+
+    PUT_16BE_FROM_VAL(val_cycle);        /* 0x17 Cycle Count */
+    PUT_16BE_FROM_VAL(val_full_cap);     /* 0x10 Full Charge Capacity */
+    PUT_16BE_FROM_VAL(val_design_cap);   /* 0x18 Design Capacity */
+    PUT_16BE_FROM_VAL(val_remaining);    /* 0x0F Remaining Capacity */
+    PUT_16BE_FROM_VAL(val_chg_status);   /* 0x16 Charging Status (原始 16bit) */
+    PUT_16BE_FROM_VAL(val_time_to_full); /* 0x13 Time to Full */
+    PUT_16BE_FROM_VAL(val_temp);         /* 0x08 Temperature */
+    PUT_16BE_FROM_VAL(val_vol);          /* 0x09 Voltage */
+    PUT_16BE_FROM_VAL(val_curr);         /* 0x0A Current */
+
+#undef PUT_16BE_FROM_VAL
+
+    /* 计算 CRC：从 len_hi 开始到最后一个数据字节 */
+    crc_start_index = 3; /* buf[3] = len_hi */
+    crc_len         = idx - crc_start_index;
+    crc             = calc_add_crc(&buf[crc_start_index], crc_len);
+
+    /* CRC */
+    buf[idx++] = crc;
+
+    /* Tail */
+    buf[idx++] = 0xFF;
+    buf[idx++] = 0xFF;
+    buf[idx++] = 0xFF;
+
+    /* 通过 USART0 发送 */
+    usart_transmit(USART0, buf, (uint8_t)idx);
+}

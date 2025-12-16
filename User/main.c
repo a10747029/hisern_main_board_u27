@@ -34,7 +34,8 @@ uint8_t host_bootup_ok        = 0;
 extern uint8_t adc_value[20];
 
 uint32_t last_report_ms = 0;
-
+extern void periodic_adc_report(void);
+extern void periodic_battery_report(void);
 int main(void)
 {
     nvic_irq_enable(USART0_IRQn, 0, 0);
@@ -70,6 +71,9 @@ int main(void)
 
         if ((now - last_report_ms) >= 1000) {
             last_report_ms = now;
+            /* 新增：1s 周期上报 */
+            periodic_adc_report();
+            periodic_battery_report();
             printf("kelland see peridoc report\r\n");
         }
 
