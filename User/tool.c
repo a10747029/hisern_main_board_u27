@@ -715,7 +715,7 @@ void periodic_adc_report(void)
     /* 有效数据长度（子命令 + 20 字节 ADC） */
     const uint16_t payload_len = 1 + 20;
     /* Type(1) + Data(1+20) + Len(2) */
-    len_field = 1 + payload_len + 2;
+    len_field = 1 + payload_len ;
     len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
     len_lo    = (uint8_t)(len_field & 0xFF);
 
@@ -843,7 +843,7 @@ void periodic_battery_report(void)
     /* 有效数据长度（子命令 + 9*2 字节） */
     const uint16_t payload_len = 1 + 18;
     /* Type(1) + Data(1+18) + Len(2) */
-    len_field = 1 + payload_len + 2;
+    len_field = 1 + payload_len ;
     len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
     len_lo    = (uint8_t)(len_field & 0xFF);
 
