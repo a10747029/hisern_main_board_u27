@@ -136,6 +136,11 @@ uint8_t usart1_receiver_buffer[32];
 uint8_t adc_value[20];
 extern int need_report_adc;
 int message1_begin = 0;
+
+/* 关机计数：收到 HOST 的关机命令后设置，利用 UART1 每秒一帧来递减 */
+extern volatile uint32_t shutdown_counter;
+extern void shutdown_execute(void);
+
 void USART1_IRQHandler(void)//与另一个芯片进行通信的串口
 {
     if (RESET != usart_interrupt_flag_get(USART1, USART_INT_FLAG_RBNE)) {
@@ -181,6 +186,12 @@ void USART1_IRQHandler(void)//与另一个芯片进行通信的串口
                 if (usart1_receiver_buffer[MCU_RECEIVE_COUNT - 1] == 0xFF) {
                     memcpy(adc_value, &usart1_receiver_buffer[2], 20);
                     need_report_adc = 1;
+
+	     	    /* 利用 UART1 每秒一帧的特性做关机倒计时 */
+            	    if (shutdown_counter > 0) 
+                    	shutdown_counter--;
+                    if (shutdown_counter == 0) 
+                    	shutdown_execute();
                 } else {
                     printf("Invalid end byte: Expected 0xFF\n");
                 }

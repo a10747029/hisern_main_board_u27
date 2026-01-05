@@ -37,6 +37,17 @@ extern uint8_t adc_value[20];
 uint32_t last_report_ms = 0;
 extern void periodic_adc_report(void);
 extern void periodic_battery_report(void);
+
+/* 关机倒计时（秒），由上位机命令设置，UART1 每秒一帧来递减 */
+volatile uint32_t shutdown_counter = -1;
+
+/* 实际执行关机：将 PA7 拉低 */
+void shutdown_execute(void)
+{
+    /* 直接关闭 PA7 电源输出 */
+    gpio_bit_reset(GPIOA, GPIO_PIN_7);
+}
+
 int main(void)
 {
     nvic_irq_enable(USART0_IRQn, 0, 0);

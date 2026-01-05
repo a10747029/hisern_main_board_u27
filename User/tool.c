@@ -164,11 +164,16 @@ void usart_transmit(uint32_t usart_periph, uint8_t *data, uint8_t length)
 #define HOST_COMMAND_GET_BAT_CAPACITY      0x04
 #define HOST_COMMAND_GET_BAT_TEMPEARATURE  0x05
 #define HOST_COMMAND_GET_BAT_VOLTAGE       0x06
+#define HOST_COMMAND_SHUTDOWN              0x07
 #define HOST_COMMAND_BOOTUP_SUCCESS        0x10
 
 extern uint8_t adc_value[];
 extern uint8_t host_receiver_buffer[HOST_RECEIVE_COUNT];
 extern uint8_t host_bootup_ok;
+
+/* 关机倒计时及执行函数（在 main.c 中定义） */
+extern volatile uint32_t shutdown_counter;
+extern void shutdown_execute(void);
 
 int battery_temp_data = -1;
 
@@ -186,6 +191,7 @@ uint8_t host_reply_get_adc_value_buffer[24]      = {0x55, 0xaa, HOST_COMMAND_GET
 uint8_t host_reply_get_bat_capacity_buffer[6]    = {0x55, 0xaa, HOST_COMMAND_GET_BAT_CAPACITY,     0x00, 0x00, 0xff};
 uint8_t host_reply_get_bat_temperature_buffer[6] = {0x55, 0xaa, HOST_COMMAND_GET_BAT_TEMPEARATURE, 0x00, 0x00, 0xff};
 uint8_t host_reply_get_bat_voltage_buffer[6]     = {0x55, 0xaa, HOST_COMMAND_GET_BAT_VOLTAGE,      0x00, 0x00, 0xff};
+uint8_t host_reply_shutdown_buffer[6]            = {0x55, 0xaa, HOST_COMMAND_SHUTDOWN,             0x00, 0x00, 0xff};
 uint8_t host_reply_bootup_success_buffer[6]      = {0x55, 0xaa, HOST_COMMAND_BOOTUP_SUCCESS,       0x00, 0x00, 0xff};
 uint8_t host_reply_error_status_buffer[6]        = {0x55, 0xaa, 0xff, 0xff, 0xff, 0xff};
 
@@ -283,6 +289,31 @@ void process_command(void)
                            host_reply_get_bat_voltage_buffer,
                            sizeof(host_reply_get_bat_voltage_buffer));
             break;
+        
+	case HOST_COMMAND_SHUTDOWN:
+        {
+            /* 解析上位机传过来的关机时间（单位：秒） */
+            uint16_t shutdown_time =
+                (uint16_t)(((uint16_t)host_receiver_buffer[3] << 8) |
+                           (uint16_t)host_receiver_buffer[4]);
+
+            /* 回显设置的时间（高/低字节） */
+            host_reply_shutdown_buffer[3] = host_receiver_buffer[3];
+            host_reply_shutdown_buffer[4] = host_receiver_buffer[4];
+            usart_transmit(USART0,
+                           host_reply_shutdown_buffer,
+                           sizeof(host_reply_shutdown_buffer));
+
+            if (shutdown_time == 0) {
+                /* 立刻关机：直接拉低 PA7 */
+                shutdown_counter = 0;
+                shutdown_execute();
+            } else {
+                /* 延时关机：利用 UART1 每秒一帧递减 shutdown_counter */
+                shutdown_counter = shutdown_time;
+            }
+            break;
+        }
 
         case HOST_COMMAND_BOOTUP_SUCCESS:
             host_bootup_ok = 1;
