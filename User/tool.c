@@ -819,6 +819,8 @@ int BQ40Z50_Read_Temp(void);
 int BQ40Z50_Read_Vol(void);
 int BQ40Z50_Read_Current(void);
 
+/* 静态变量记录上一次灯的开关状态，用于闪烁（与旧逻辑一致） */
+static uint8_t s_bat_led_on = 0;
 void periodic_battery_report(void)
 {
     uint8_t buf[96];   /* 足够容纳本帧 */
@@ -946,8 +948,6 @@ void periodic_battery_report(void)
     usart_transmit(USART0, buf, (uint8_t)idx);
 
     /* ----------------- 串口发送之后的充电控制逻辑 + LED 逻辑 ----------------- */
-    /* 静态变量记录上一次灯的开关状态，用于闪烁（与旧逻辑一致） */
-    static uint8_t s_bat_led_on = 0;
 
     /* 温度计算：temp(℃) ≈ (val_temp * 10 - 27315) / 100 */
     if ((val_temp >= 0) && (val_full_cap > 0)) {
