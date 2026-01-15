@@ -290,7 +290,7 @@ void process_command(void)
                            sizeof(host_reply_get_bat_voltage_buffer));
             break;
         
-	case HOST_COMMAND_SHUTDOWN:
+        case HOST_COMMAND_SHUTDOWN:
         {
             /* 解析上位机传过来的关机时间（单位：秒） */
             uint16_t shutdown_time =
@@ -809,18 +809,11 @@ void periodic_adc_report(void)
  * 共 9 * 2 = 18 字节，有效数据 = [子命令(1)] + 18 字节 = 19 字节
  */
 
-int BQ40Z50_Read_CycleCount(void);
-int BQ40Z50_Read_FullChargeCapacity(void);
-int BQ40Z50_Read_DesignCapacity(void);
-int BQ40Z50_Read_RemainingCapacity(void);
-int BQ40Z50_Read_ChargingStatus(void);
-int BQ40Z50_Read_TimeToFull(void);
-int BQ40Z50_Read_Temp(void);
-int BQ40Z50_Read_Vol(void);
-int BQ40Z50_Read_Current(void);
-
-/* 静态变量记录上一次灯的开关状态，用于闪烁（与旧逻辑一致） */
+/* 静态变量记录上一次灯的开关状态，用于闪烁 */
 static uint8_t s_bat_led_on = 0;
+/* 记录上一次是否处于充电状态，配合 dsg 位使用 */
+static uint8_t s_charging_active = 0;
+
 void periodic_battery_report(void)
 {
     uint8_t buf[96];   /* 足够容纳本帧 */
@@ -837,50 +830,11 @@ void periodic_battery_report(void)
     int val_full_cap     = BQ40Z50_Read_FullChargeCapacity();
     int val_design_cap   = BQ40Z50_Read_DesignCapacity();
     int val_remaining    = BQ40Z50_Read_RemainingCapacity();
-    int val_chg_status   = BQ40Z50_Read_ChargingStatus();
+    int val_chg_status   = BQ40Z50_Read_ChargingStatus();   /* 内含 dsg 位 */
     int val_time_to_full = BQ40Z50_Read_TimeToFull();
     int val_temp         = BQ40Z50_Read_Temp();
     int val_vol          = BQ40Z50_Read_Vol();
     int val_curr         = BQ40Z50_Read_Current();
-
-#if 0
-    /* ----------------- 根据 0x16 充电状态控制电池灯（旧逻辑，已屏蔽） ----------------- */
-    /* 静态变量记录上一次灯的开关状态，用于闪烁 */
-    static uint8_t s_bat_led_on = 0;
-
-    /* 这里示例：
-     *   假设 val_chg_status 的 bit4 表示“正在充电”，bit5 表示“已充满”。
-     *   你可以按实际 BQ40Z50 的状态位定义修改下面两个宏。
-     */
-    #define CHG_STATUS_CHARGING_MASK   (1 << 4)
-    #define CHG_STATUS_FULL_MASK       (1 << 5)
-
-    if (val_chg_status >= 0) {
-        chg_raw = (uint16_t)val_chg_status;
-
-        if (chg_raw & CHG_STATUS_CHARGING_MASK) {
-            /* 充电中：闪烁灯 */
-            s_bat_led_on = !s_bat_led_on;
-            if (s_bat_led_on) {
-                gpio_bit_set(GPIOC, GPIO_PIN_13);   /* 灯亮 */
-            } else {
-                gpio_bit_reset(GPIOC, GPIO_PIN_13); /* 灯灭 */
-            }
-        } else if (chg_raw & CHG_STATUS_FULL_MASK) {
-            /* 充满：常亮灯 */
-            s_bat_led_on = 1;
-            gpio_bit_set(GPIOC, GPIO_PIN_13);
-        } else {
-            /* 其它状态：灭灯，避免误亮 */
-            s_bat_led_on = 0;
-            gpio_bit_reset(GPIOC, GPIO_PIN_13);
-        }
-    } else {
-        /* 读取失败时，关灯防止误判 */
-        s_bat_led_on = 0;
-        gpio_bit_reset(GPIOC, GPIO_PIN_13);
-    }
-#endif
 
     /* 有效数据长度（子命令 + 9*2 字节） */
     const uint16_t payload_len = 1 + 18;
@@ -947,47 +901,84 @@ void periodic_battery_report(void)
     /* 通过 USART0 发送 */
     usart_transmit(USART0, buf, (uint8_t)idx);
 
-    /* ----------------- 串口发送之后的充电控制逻辑 + LED 逻辑 ----------------- */
+    /* ----------------- 串口发送之后的充电控制逻辑 + LED 逻辑（按你描述的行为更新） ----------------- */
 
-    /* 温度计算：temp(℃) ≈ (val_temp * 10 - 27315) / 100 */
-    if ((val_temp >= 0) && (val_full_cap > 0)) {
+    /*
+     * 规则（AC on/off 由 0x16 的 dsg 位决定，假设 bit6 为 dsg）：
+     *   dsg = 0 ：AC on（外接电源，电池不放电）
+     *   dsg = 1 ：电池在放电
+     *
+     *   - 如果 dsg == 0（AC on）：
+     *       1) 如果当前已经在充电（上一次 PB6 为高，即 s_charging_active == 1），
+     *          那么允许一直充到 80%，到 80% 后停止充电。
+     *       2) 如果当前没在充电（s_charging_active == 0），
+     *          只有当电量 < 60% 时才开始充电（PB6 拉高）。
+     *
+     *   - 如果 dsg == 1（电池在放电，没有 AC），
+     *       一定停止充电（PB6 拉低，s_charging_active = 0）。
+     *
+     *   温度：只在 0~50℃ 时允许“开启/保持”充电；
+     *         超出范围时必须停止充电。
+     *
+     *   LED（PC13）：
+     *       - 当 PB6 高（正在充电）时闪烁。
+     *       - 当 PB6 低（���充电）时熄灭。
+     */
+
+    if ((val_temp >= 0) && (val_full_cap > 0) && (val_chg_status >= 0)) {
         int temp_c = (val_temp * 10 - 27315) / 100;
-
-        /* 电量(%) ≈ 剩余容量(0x0F) / 满电容量(0x10) * 100 */
         int percent = (int)((long long)val_remaining * 100 / val_full_cap);
 
-        /* 只有温度在 0~50℃ 之间时才允许充电控制 */
+        chg_raw = (uint16_t)val_chg_status;
+        /* 假设 0x16 的 bit6 为 dsg：1=放电，0=AC on */
+        const uint16_t DSG_MASK = (1U << 6);
+        uint8_t dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
+
+        /* 默认：不改变 s_charging_active，下面根据条件修改 */
         if ((temp_c >= 0) && (temp_c <= 50)) {
-            if (percent < 60) {
-                /* 电量 < 60% 且温度合适 -> 开始充电，PB6 拉高 */
-                gpio_bit_set(GPIOB, GPIO_PIN_6);
-
-                /* 充电中：按之前方式闪烁 PC13 */
-                s_bat_led_on = !s_bat_led_on;
-                if (s_bat_led_on) {
-                    gpio_bit_set(GPIOC, GPIO_PIN_13);
-                } else {
-                    gpio_bit_reset(GPIOC, GPIO_PIN_13);
-                }
-            } else if (percent > 80) {
-                /* 电量 > 80% -> 关闭充电，PB6 拉低，灯常亮表示满电 */
-                gpio_bit_reset(GPIOB, GPIO_PIN_6);
-
-                s_bat_led_on = 1;
-                gpio_bit_set(GPIOC, GPIO_PIN_13);
+            if (dsg == 1U) {
+                /* 电池在放电，没有 AC -> 禁止充电 */
+                s_charging_active = 0;
             } else {
-                /* 60%~80% 区间保持当前充电状态，不再改变 PB6；
-                   LED 也不再切换，维持上一次状态，避免频繁闪烁 */
+                /* dsg == 0 : AC on */
+                if (s_charging_active) {
+                    /* 已在充电：允许一直充到 80% 再停 */
+                    if (percent >= 80) {
+                        s_charging_active = 0;
+                    } else {
+                        /* <80%，保持充电状态不变 */
+                    }
+                } else {
+                    /* 当前没充电：只有电量 <60% 时才开启充电 */
+                    if (percent < 60) {
+                        s_charging_active = 1;
+                    }
+                }
             }
         } else {
-            /* 温度不在安全范围，禁止充电并熄灭灯 */
-            gpio_bit_reset(GPIOB, GPIO_PIN_6);
-            s_bat_led_on = 0;
+            /* 温度不在安全范围 -> 不允许充电 */
+            s_charging_active = 0;
+        }
+    } else {
+        /* 采样异常 -> 保险起见不充电 */
+        s_charging_active = 0;
+    }
+
+    /* 根据最终 s_charging_active 控制 PB6 和 PC13 */
+    if (s_charging_active) {
+        /* 开启充电：PB6 拉高；灯闪烁 */
+        gpio_bit_set(GPIOB, GPIO_PIN_6);
+
+        s_bat_led_on = !s_bat_led_on;
+        if (s_bat_led_on) {
+            gpio_bit_set(GPIOC, GPIO_PIN_13);
+        } else {
             gpio_bit_reset(GPIOC, GPIO_PIN_13);
         }
     } else {
-        /* 采样异常时，保险起见不充电并熄灭灯 */
+        /* 停止充电：PB6 拉低；灯熄灭 */
         gpio_bit_reset(GPIOB, GPIO_PIN_6);
+
         s_bat_led_on = 0;
         gpio_bit_reset(GPIOC, GPIO_PIN_13);
     }
