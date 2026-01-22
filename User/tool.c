@@ -550,7 +550,7 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     /* STEP 7: Enable ACK (for first byte) */
     i2c_ack_config(i2c_bus, I2C_ACK_ENABLE);
 
-    /* STEP 8: Wait RBNE then read LSB (first byte) */
+    /* STEP 8: Wait RBNE then read LSB (第一字节) */
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_RBNE) && --timeout);
     if (timeout <= 0) {
@@ -563,7 +563,7 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     i2c_ack_config(i2c_bus, I2C_ACK_DISABLE);
     i2c_stop_on_bus(i2c_bus);
 
-    /* STEP 10: Wait RBNE then read MSB (second byte) */
+    /* STEP 10: Wait RBNE then read MSB (第二字节) */
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_RBNE) && --timeout);
     if (timeout <= 0) {
@@ -901,32 +901,23 @@ void periodic_battery_report(void)
     /* 通过 USART0 发送 */
     usart_transmit(USART0, buf, (uint8_t)idx);
 
-    /* ----------------- 串口发送之后的充电控制逻辑 + LED 逻辑（按你描述的行为更新） ----------------- */
+    /* ----------------- 串口发送之后的充电控制逻辑 + LED 逻辑（更新为：只要 <100% 就充电） ----------------- */
 
     /*
-     * 规则（AC on/off 由 0x16 的 dsg 位决定，假设 bit6 为 dsg）：
-     *   dsg = 0 ：AC on（外接电源，电池不放电）
-     *   dsg = 1 ：电池在放电
+     * 规则更新：
+     *   - 只要 SOC != 100%，并且：
+     *       1) 有 AC（dsg == 0）
+     *       2) 温度在 0~50℃ 之间
+     *     就允许充电（PB6 高，LED 闪烁）。
      *
-     *   - 如果 dsg == 0（AC on）：
-     *       1) 如果当前已经在充电（上一次 PB6 为高，即 s_charging_active == 1），
-     *          那么允许一直充到 80%，到 80% 后停止充电。
-     *       2) 如果当前没在充电（s_charging_active == 0），
-     *          只有当电量 < 60% 时才开始充电（PB6 拉高）。
-     *
-     *   - 如果 dsg == 1（电池在放电，没有 AC），
-     *       一定停止充电（PB6 拉低，s_charging_active = 0）。
-     *
-     *   温度：只在 0~50℃ 时允许“开启/保持”充电；
-     *         超出范围时必须停止充电。
-     *
-     *   LED（PC13）：
-     *       - 当 PB6 高（正在充电）时闪烁。
-     *       - 当 PB6 低（���充电）时熄灭。
+     *   - SOC == 100% 或温���不在 0~50℃ 或 dsg == 1（电池放电，无 AC）：
+     *       必须停止充电（PB6 低，LED 熄灭）。
      */
 
-    if ((val_temp >= 0) && (val_full_cap > 0) && (val_chg_status >= 0)) {
+    if ((val_temp >= 0) && (val_full_cap > 0) && (val_chg_status >= 0) && (val_remaining >= 0)) {
         int temp_c = (val_temp * 10 - 27315) / 100;
+
+        /* 计算电量百分比（0~100），保护性写法：先用 64bit 避免溢出 */
         int percent = (int)((long long)val_remaining * 100 / val_full_cap);
 
         chg_raw = (uint16_t)val_chg_status;
@@ -934,26 +925,20 @@ void periodic_battery_report(void)
         const uint16_t DSG_MASK = (1U << 6);
         uint8_t dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
 
-        /* 默认：不改变 s_charging_active，下面根据条件修改 */
+        /* 先假定不充电 */
+        s_charging_active = 0;
+
+        /* 满足温度 OK + 有 AC + SOC <100，才允许充电 */
         if ((temp_c >= 0) && (temp_c <= 50)) {
-            if (dsg == 1U) {
-                /* 电池在放电，没有 AC -> 禁止充电 */
-                s_charging_active = 0;
-            } else {
-                /* dsg == 0 : AC on */
-                if (s_charging_active) {
-                    /* 已在充电：允许一直充到 80% 再停 */
-                    if (percent >= 80) {
-                        s_charging_active = 0;
-                    } else {
-                        /* <80%，保持充电状态不变 */
-                    }
+            if (dsg == 0U) {  /* AC on */
+                if (percent < 100) {
+                    s_charging_active = 1;
                 } else {
-                    /* 当前没充电：只有电量 <60% 时才开启充电 */
-                    if (percent < 60) {
-                        s_charging_active = 1;
-                    }
+                    s_charging_active = 0;   /* 已经 100%，不再充电 */
                 }
+            } else {
+                /* dsg == 1：电池在放电，无 AC，一定不充电 */
+                s_charging_active = 0;
             }
         } else {
             /* 温度不在安全范围 -> 不允许充电 */
