@@ -836,6 +836,8 @@ void periodic_battery_report(void)
     int val_vol          = BQ40Z50_Read_Vol();
     int val_curr         = BQ40Z50_Read_Current();
 
+    const uint16_t DSG_MASK = (1U << 6);
+    uint8_t dsg;
     /* 有效数据长度（子命令 + 9*2 字节） */
     const uint16_t payload_len = 1 + 18;
     /* Type(1) + Data(1+18) + Len(2) */
@@ -922,8 +924,7 @@ void periodic_battery_report(void)
 
         chg_raw = (uint16_t)val_chg_status;
         /* 假设 0x16 的 bit6 为 dsg：1=放电，0=AC on */
-        const uint16_t DSG_MASK = (1U << 6);
-        uint8_t dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
+        dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
 
         /* 先假定不充电 */
         s_charging_active = 0;
