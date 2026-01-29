@@ -89,6 +89,7 @@ int main(void)
 #define HOST_COMMAND_GET_BAT_CAPACITY      0x04
 #define HOST_COMMAND_GET_BAT_TEMPEARATURE  0x05
 #define HOST_COMMAND_GET_BAT_VOLTAGE       0x06
+#define HOST_COMMAND_SHUTDOWN              0x07
 #define HOST_COMMAND_BOOTUP_SUCCESS        0x10
 ```
 
@@ -293,7 +294,26 @@ memcpy(&host_reply_get_adc_value_buffer[3], adc_value, 20);
 
 - 同样，电压值为原始寄存器值，上位机根据 BQ40Z50 协议折算为 mV 等。
 
-#### 1.3.8 Bootup 成功通知（0x10，HOST_COMMAND_BOOTUP_SUCCESS）
+#### 1.3.8 关机命令（0x07，HOST_COMMAND_SHUTDOWN）【新增说明】
+
+- 上位机请求：
+
+  ```text
+  AA 55 07 <高字节> <低字节> FF
+  ```
+
+  - D3D4 组合为 16bit 秒数：
+    - `0`：立即关机，直接拉低 PA7/0/1/6/5/4。
+    - `>0`：设置 `shutdown_counter`，由 UART1 每秒一帧递减；递减到 0 时执行关机。
+- 固件回显设置值：
+
+  ```text
+  55 AA 07 <高字节> <低字节> FF
+  ```
+
+- 另外，硬件 PB7 作为关机检测输入：低电平持续 **8 秒** 也会触发 `shutdown_execute()`。
+
+#### 1.3.9 Bootup 成功通知（0x10，HOST_COMMAND_BOOTUP_SUCCESS）
 
 - 上位机请求：
 
@@ -475,98 +495,67 @@ Len = Type(1) + Data(1+N) + Len自身(2)
 
 函数位置：`User/tool.c` -> `void periodic_battery_report(void)`
 
-此协议帧打包了 **9 个 BQ40Z50 电池寄存器** 的原始数值，每个寄存器为 16bit，大端顺序输出。
+> **与旧版相比：新增多个寄存器字段，并在末尾增加 1 字节 percent。**
 
 #### 3.3.1 电池寄存器说明与健康度/电量计算
 
 本项目中使用的 BQ40Z50 电池相关寄存器如下（寄存器地址均为 16 进制）：
 
 1. **充电次数（Cycle Count）– `0x17`**
-   - 统计电池经历的充放电循环次数。
 2. **电池满电容量（Full Charge Capacity）– `0x10`**
-   - 当前估算的「满充容量」，单位和缩放请参考 BQ40Z50 数据手册（一般为 mAh 或类似单位）。
 3. **电池设计容量（Design Capacity）– `0x18`**
-   - 电池设计时的额定容量（标称容量）。
-4. **电池健康度（SoH）**
-   - 建议由上位机根据下面关系计算：
-   - **健康度(%) ≈ FullChargeCapacity / DesignCapacity**
-     ```text
-     健康度(%) ≈ 满电容量(0x10) / 设计容量(0x18)
-     ```
-     例如：
-     ```text
-     SoH(%) = FullChargeCapacity_raw / DesignCapacity_raw * 100
-     ```
-5. **剩余容量（Remaining Capacity）– `0x0F`**
-   - 当前剩余容量的原始值。
-6. **电池电量百分比（SOC）**
-   - 上位机可根据以下关系计算：
-   - **电量百分比(%) ≈ 剩余容量 / 满电容量**
-     ```text
-     电量(%) ≈ 剩余容量(0x0F) / 满电容量(0x10)
-     ```
-     即：
-     ```text
-     SOC(%) = RemainingCapacity_raw / FullChargeCapacity_raw * 100
-     ```
-7. **是否在充电（Charging Status）– `0x16`**
-   - 一个 16bit 状态寄存器，包含充电/放电相关标志位。
-   - 固件仅透传原始值，由上位机按 BQ40Z50 文档解析每一位的含义（例如「正在充电、正在放电、充电完成」等）。
-8. **预计充满时间（Time to Full）– `0x13`**
-   - 剩余充满时间的估算值，单位和缩放由 BQ40Z50 定义。
-9. **电池温度（Temperature）– `0x08`**
-   - 一般为 0.1K 单位的温度，固件不做换算，由上位机根据协议转换为摄氏度。
-10. **电池电压（Voltage）– `0x09`**
-    - 电池组电压，单位和缩放参考 BQ40Z50（常见为 mV）。
-11. **电池电流（Current）– `0x0A`**
-    - 电池电流（充电为正/放电为负的编码方式由 BQ40Z50 决定）。
+4. **剩余容量（Remaining Capacity）– `0x0F`**
+5. **充电状态（Charging Status）– `0x16`**（原始 16bit 标志位）
+6. **预计充满时间（Time to Full）– `0x13`**
+7. **电池温度（Temperature）– `0x08`**
+8. **电池电压（Voltage）– `0x09`**
+9. **电池电流（Current）– `0x0A`**
+10. **充电电流（Charging Current）– `0x14`**【新增】
+11. **充电电压（Charging Voltage）– `0x15`**【新增】
+12. **电池模式（Battery Mode）– `0x03`**【新增】
+13. **平均电流（Average Current）– `0x0B`**【新增，判 AC On 用，>=0 认为有外接电源】
+14. **相对剩余电量（Relative State Of Charge）– `0x0D`**【新增】
+15. **绝对剩余电量（Absolute State Of Charge）– `0x0E`**【新增】
+16. **percent（1 字节）**：`Remaining / Full - MODIFY_FULL_CAP`（M=10）；<0 置 0xFF，>100 未截断。
 
-> 说明：  
-> - 固件在 I2C 读取层只返回寄存器的原始 16bit 数值，不做单位换算；  
-> - 上位机应统一使用上述寄存器值，基于 BQ40Z50 官方协议完成单位转换与进一步的统计（SoC、SoH等）。
+计算建议：
+- SoH(%) ≈ FullChargeCapacity / DesignCapacity
+- SoC(%) ≈ RemainingCapacity / FullChargeCapacity
+- ChargingStatus 按 BQ40Z50 文档解析各 bit；DSG 位用于充/放电判定。
 
 #### 3.3.2 周期帧 Data 区字段定义（子命令 0x81）
 
-`periodic_battery_report()` 会一次性读取上述 9 个寄存器并按以下顺序打包：
+`periodic_battery_report()` 会一次性读取上述寄存器并按以下顺序打包（大端）：
 
-| 数据顺序 | 寄存器地址 | 字段含义                 | 说明                         |
-|----------|------------|--------------------------|------------------------------|
-| 1        | `0x17`     | Cycle Count              | 充电循环次数                 |
-| 2        | `0x10`     | Full Charge Capacity     | 当前估算满充容量             |
-| 3        | `0x18`     | Design Capacity          | 电池设计容量                 |
-| 4        | `0x0F`     | Remaining Capacity       | 剩余容量                     |
-| 5        | `0x16`     | Charging Status          | 充放电状态标志（原始 16bit）|
-| 6        | `0x13`     | Time to Full             | 预计充满时间                 |
-| 7        | `0x08`     | Temperature              | 电池温度                     |
-| 8        | `0x09`     | Voltage                  | 电池电压                     |
-| 9        | `0x0A`     | Current                  | 电池电流                     |
-
-**Data 区布局：**
-
-| Data 字节索引 | 内容                                      |
-|---------------|-------------------------------------------|
-| Data[0]       | SubCmd = `0x81`                          |
-| Data[1..2]    | Cycle Count (0x17)，高字节在前           |
-| Data[3..4]    | Full Charge Capacity (0x10)，高字节在前  |
-| Data[5..6]    | Design Capacity (0x18)，高字节在前       |
-| Data[7..8]    | Remaining Capacity (0x0F)，高字节在前    |
-| Data[9..10]   | Charging Status (0x16)，高字节在前       |
-| Data[11..12]  | Time to Full (0x13)，高字节在前          |
-| Data[13..14]  | Temperature (0x08)，高字节在前           |
-| Data[15..16]  | Voltage (0x09)，高字节在前               |
-| Data[17..18]  | Current (0x0A)，高字节在前               |
+| 数据顺序 | 寄存器地址 | 字段含义                   |
+|----------|------------|----------------------------|
+| 1        | `0x17`     | Cycle Count                |
+| 2        | `0x10`     | Full Charge Capacity       |
+| 3        | `0x18`     | Design Capacity            |
+| 4        | `0x0F`     | Remaining Capacity         |
+| 5        | `0x16`     | Charging Status (raw 16bit)|
+| 6        | `0x13`     | Time to Full               |
+| 7        | `0x08`     | Temperature                |
+| 8        | `0x09`     | Voltage                    |
+| 9        | `0x0A`     | Current                    |
+| 10       | `0x14`     | Charging Current           |
+| 11       | `0x15`     | Charging Voltage           |
+| 12       | `0x03`     | Battery Mode               |
+| 13       | `0x0B`     | Average Current            |
+| 14       | `0x0D`     | Relative State Of Charge   |
+| 15       | `0x0E`     | Absolute State Of Charge   |
+| 16       | —          | percent (1B，见上文公式)   |
 
 每个 16bit 值均通过宏 `PUT_16BE_FROM_VAL` 写入：
-
-- 读取成功：写入实际 16bit 数值（高字节在前）。
-- 读取失败（返回 -1）：写入 `0xFFFF` 作为无效占位。
+- 读取成功：写实际值（高字节在前）。
+- 读取失败（返回 -1）：写 `0xFFFF`。
 
 #### 3.3.3 整帧格式总结（0x81）
 
 - Header：`AA AA AA`
-- Len：`len_field = 1(Type) + (1+18)(Data) + 2(Len) = 22`
+- Len：`len_field = 1(Type) + (1+30+1)(Data) + 2(Len) = 34`
 - Type：`0xFE`
-- Data：`[0]=0x81` + 9×(高字节 + 低字节) 的 16bit 寄存器值
+- Data：`[0]=0x81` + 15×(高字节+低字节) + 1B percent
 - CRC：从 Len_H 起算至 Data 最后一个字节
 - Tail：`FF FF FF`
 
@@ -576,13 +565,15 @@ Len = Type(1) + Data(1+N) + Len自身(2)
 2. 读取 Len，确定整帧长度是否合理。
 3. 检查 Type 是否等于 `0xFE`。
 4. 确认子命令 `Data[0] == 0x81`。
-5. 按上述顺序解析每个 16bit 值（大端），为 0xFFFF 的字段视为无效。
+5. 按上述顺序解析每个 16bit 值（大端），为 0xFFFF 的字段视为无效；percent 为 1 字节。
 6. 在上位机层：
-   - 以 `FullChargeCapacity(0x10)` 和 `DesignCapacity(0x18)` 计算电池健康度 SoH；
-   - 以 `RemainingCapacity(0x0F)` 和 `FullChargeCapacity(0x10)` 计算电量百分比 SoC；
-   - 按 BQ40Z50 手册解析 ChargingStatus 每一位，以判断是否在充电；
-   - 结合 Temp/Voltage/Current 做曲线或告警。
+   - FullChargeCapacity / DesignCapacity -> SoH
+   - RemainingCapacity / FullChargeCapacity -> SoC
+   - ChargingStatus 按位解析；DSG 位用于充/放电判断。
+   - Average Current >= 0 视为 AC 外接电源存在；仅在 AC on 且未满电时，固件会拉高 PB6 充电，并让 PC13 闪烁。
 
+7. charger on :AA AA AA 00 21 FE 81 00 02 0B A1 0C E4 07 61 00 80 00 65 0B AF 3E 22 05 C1 06 72 41 A0 60 01 05 C0 00 40 00 3A 35 99 FF FF FF 
+8. charger off:AA AA AA 00 21 FE 81 00 02 0B A1 0C E4 07 61 00 C0 00 65 0B AF 3E 22 05 C1 06 72 41 A0 60 01 05 C0 00 40 00 3A 35 D9 FF FF FF
 ---
 
 ## 4. 主循环与三类协议关系
@@ -617,7 +608,7 @@ int main(void)
         // 3. 收到下位 MCU 的 ADC 帧后，触发新扩展协议上报 (USART1 -> USART0)
         if (need_report_adc) {
             periodic_adc_report();      // 子命令 0x80, 上报 20 路 ADC
-            periodic_battery_report();  // 子命令 0x81, 上报 9 个电池寄存器
+            periodic_battery_report();  // 子命令 0x81, 上报电池寄存器 + percent
             need_report_adc = 0;
         }
     }
@@ -626,7 +617,7 @@ int main(void)
 
 关系总结：
 
-- **USART0 + 6 字节协议**：上位机主动发命令（控制电源、查询状态、电池基础信息、通知 Bootup）。
+- **USART0 + 6 字节协议**：上位机主动发命令（控制电源、查询状态、电池基础信息、通知 Bootup、关机定时/立即）。
 - **USART1 + 24 字节 ADC 帧**：下位 MCU 周期性推送 20 路 ADC，驱动 `need_report_adc`。
 - **USART0 + AA AA AA 扩展协议**：本板将最新 ADC 和电池寄存器信息按 0x80/0x81 两种子命令打包给上位机。
 
@@ -640,67 +631,17 @@ int main(void)
 
 2. **控制命令**
    - 使用 6 字节短帧 (`AA 55 cmd hi lo FF`) 控制电源和查询。
+   - 0x07 可设关机倒计时或立即关机。
    - 避免连续错位，可在上位机解码时同样做帧头校正。
 
 3. **周期数据**
    - 监听 `AA AA AA` 头的扩展帧：
-     - `SubCmd=0x80`：20 路 ADC，直接可视化或用于阈值判断。
-     - AA AA AA 00 18 FE 80 09 B2 0B EB 0D 64 0E 4B 0E E3 0F 2A 0F 55 0F 79 00 36 00 5C B9 FF FF FF
-     - `SubCmd=0x81`：9 个电池寄存器，结合 BQ40Z50 文档还原电压、电流、温度、SoC、SoH、充电状态和预计充满时间等。
-     - AA AA AA 00 16 FE 81 00 01 0B F8 0C E4 00 00 02 D0 FF FF 0B C7 2E 20 00 00 79 FF FF FF
+     - `SubCmd=0x80`：20 路 ADC。
+     - `SubCmd=0x81`：15 个 16bit 电池寄存器 + 1B percent（见 3.3.2）。
    - 利用：
      - 满电容量(0x10) / 设计容量(0x18) -> 估算电池健康度；
-     - 剩余容量(0x0F) / 满电容量(0x10) -> 实时电池电量百分比。
-
+     - 剩余容量(0x0F) / 满电容量(0x10) -> 实时电池电量百分比；
+     - Average Current >= 0 表示 AC on，可结合 ChargingStatus 做充/放电状态判定；
+     - PB7 低保持 8 秒会触发关机（硬件安全策略）。
 
 如需新增协议命令或拓展 Data 字段，只需在现有命令/子命令框架下增加对应处理逻辑，并与上位机解析程序同步即可。
-| 名字             | 寄存器值 | 说明 |
-|------------------|----------|------|
-| 充电次数         | 0x17     | 电池经历的完整充放电循环次数，用于评估电池老化程度 |
-| 电池满电容量     | 0x10     | 当前状态下电池可充到的最大容量 |
-| 电池设计容量     | 0x18     | 电池出厂时的标称设计容量 |
-| 电池健康度       | —        | 满电容量 / 设计容量，用于衡量电池健康状况 |
-| 剩余容量         | 0x0F     | 当前电池中剩余的实际容量 |
-| 电池电量百分比   | —        | 剩余容量 / 满电容量，表示当前电量百分比 |
-| 是否在充电       | 0x16     | 指示电池当前是否处于充电状态 |
-| 预计充满时间     | 0x13     | 根据当前充电状态估算的剩余充满时间 |
-| 电池温度         | 0x08     | 电池当前温度，通常用于安全与寿命监测 |
-| 电池电压         | 0x09     | 电池当前输出电压 |
-| 电池电流         | 0x0A     | 电池当前充放电电流，正负表示充电或放电 |
-
-# bq40z50 BatteryStatus (0x16) 关键位说明
-
-## Bit 含义对照表
-
-| Bit | 名称 | 值 | 含义 |
-|----|----|----|----|
-| 6 | DSG | 0 | 充电中 |
-| 6 | DSG | 1 | 放电或空闲（Relax） |
-| 5 | FC | 1 | 已充满 |
-| 5 | FC | 0 | 未充满 |
-| 4 | FD | 1 | 已放空 |
-| 4 | FD | 0 | 未放空 |
-
----
-
-## 常见状态组合（工程常用）
-
-| 状态 | Bit6 (DSG) | Bit5 (FC) | Bit4 (FD) | 说明 |
-|----|----|----|----|----|
-| 充电中 | 0 | 0 | 0 | 正在充电，未充满 |
-| 已充满 | 0 | 1 | 0 | 充满后仍插电（异常或延迟） |
-| 放电中 | 1 | 1 | 0 | 满电且未充（典型满电状态） |
-| 空闲 / Relax | 1 | 0 | 0 | 正常放电 / 待机 |
-| 已放空 | 1 | 0 | 1 | 电池电量耗尽 |
-
----
-
-## 推荐判定顺序
-
-1. FC = 1 → 已充满  
-2. FD = 1 → 已放空  
-3. DSG = 0 → 充电中  
-4. DSG = 1 → 放电 / 空闲
-
-
-注意充电状态下灯板黄灯闪烁
