@@ -126,8 +126,8 @@ int main(void)
 
 int fputc(int ch, FILE *f)
 {
-    usart_data_transmit(USART0, (uint8_t)ch);
-    while (RESET == usart_flag_get(USART0, USART_FLAG_TBE)) {
+    usart_data_transmit(USART1, (uint8_t)ch);
+    while (RESET == usart_flag_get(USART1, USART_FLAG_TBE)) {
         ;
     }
     return ch;

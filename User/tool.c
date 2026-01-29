@@ -1,5 +1,6 @@
 #include "gd32f1x0_usart.h"
 #include "string.h"
+#include "stdint.h"
 
 /* ========================= USART 初始化 ========================= */
 
@@ -910,6 +911,10 @@ void periodic_battery_report(void)
     const uint16_t payload_len = (uint16_t)(1 + 30 + 1);  /* 子命令 + 15 个寄存器(30B) + percent(1B) */
     int      percent;
 
+    /* AC on 判定相关（Average Current 为 16bit 有符号数，<5 视为 AC 外接电源） */
+    int16_t  avg_curr_signed = 0;
+    uint8_t  ac_on = 0U;
+
     idx     = 0;
     chg_raw = 0;
     dsg     = 0;
@@ -930,6 +935,14 @@ void periodic_battery_report(void)
     val_avg_curr     = BQ40Z50_Read_AverageCurrent();
     val_rel_soc      = BQ40Z50_Read_RelativeStateOfCharge();
     val_abs_soc      = BQ40Z50_Read_AbsoluteStateOfCharge();
+
+    /* 将 0x0B 平均电流解释为有符号 16bit，并用于 AC on 判定 */
+    if (val_avg_curr >= 0) {
+        avg_curr_signed = (int16_t)((uint16_t)val_avg_curr);
+        if (avg_curr_signed < 5) {       /* <5 认为 AC 外接电源 */
+            ac_on = 1U;
+        }
+    }
 
     if ((val_full_cap > 0) && (val_remaining >= 0)) {
         percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap - MODIFY_FULL_CAP);
@@ -976,7 +989,7 @@ void periodic_battery_report(void)
     PUT_16BE_FROM_VAL(val_chg_curr);     /* 0x14 Charging Current */
     PUT_16BE_FROM_VAL(val_chg_volt);     /* 0x15 Charging Voltage */
     PUT_16BE_FROM_VAL(val_bat_mode);     /* 0x03 Battery Mode */
-    PUT_16BE_FROM_VAL(val_avg_curr);     /* 0x0B Average Current */
+    PUT_16BE_FROM_VAL(val_avg_curr);     /* 0x0B Average Current (原始值) */
     PUT_16BE_FROM_VAL(val_rel_soc);      /* 0x0D Relative State Of Charge */
     PUT_16BE_FROM_VAL(val_abs_soc);      /* 0x0E Absolute State Of Charge */
 
@@ -996,13 +1009,17 @@ void periodic_battery_report(void)
 
     usart_transmit(USART0, buf, (uint8_t)idx);
 
-    /* ----------------- 串口发送之后的充电控制逻辑（新规则：只看电量百分比） ----------------- */
+    /* ----------------- 串口发送之后的充电控制逻辑（新增 AC on 判断） ----------------- */
 
     s_charging_active = 0U;
 
-    if (percent >= 0) {
-        if (percent < 100) {
-            s_charging_active = 1U;
+    if (ac_on) { /* 只有外接电源存在时才考虑充电 */
+        if (percent >= 0) {
+            if (percent < 100) {
+                s_charging_active = 1U;
+            } else {
+                s_charging_active = 0U;
+            }
         } else {
             s_charging_active = 0U;
         }
