@@ -939,7 +939,7 @@ void periodic_battery_report(void)
     /* 将 0x0B 平均电流解释为有符号 16bit，并用于 AC on 判定 */
     if (val_avg_curr >= 0) {
         avg_curr_signed = (int16_t)((uint16_t)val_avg_curr);
-        if (avg_curr_signed < 5) {       /* <5 认为 AC 外接电源 */
+        if (avg_curr_signed >= 0) {       /* >=0 认为 AC 外接电源 */
             ac_on = 1U;
         }
     }
