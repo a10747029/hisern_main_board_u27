@@ -46,6 +46,12 @@ void shutdown_execute(void)
 {
     /* 直接关闭 PA7 电源输出 */
     gpio_bit_reset(GPIOA, GPIO_PIN_7);
+    gpio_bit_reset(GPIOA, GPIO_PIN_0);
+    gpio_bit_reset(GPIOA, GPIO_PIN_1);
+    gpio_bit_reset(GPIOA, GPIO_PIN_6);
+    gpio_bit_reset(GPIOA, GPIO_PIN_5);
+    gpio_bit_reset(GPIOA, GPIO_PIN_4);
+
 }
 
 int main(void)
