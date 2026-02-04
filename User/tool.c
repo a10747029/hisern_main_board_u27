@@ -880,9 +880,10 @@ static void monitor_pb7_shutdown(void)
  *   0x0E Absolute State Of Charge
  * 最后追加 percent（1 字节，使用新公式）再计算 CRC。
  */
+
 void periodic_battery_report(void)
 {
-    uint8_t  buf[96];   /* 足够容纳本帧 */
+    uint8_t  buf[96];
     uint16_t idx;
     uint16_t len_field;
     uint8_t  len_hi;
@@ -908,48 +909,104 @@ void periodic_battery_report(void)
     int      val_abs_soc;
     const uint16_t DSG_MASK = (1U << 6);
     uint8_t  dsg;
-    const uint16_t payload_len = (uint16_t)(1 + 30 + 1);  /* 子命令 + 15 个寄存器(30B) + percent(1B) */
+    const uint16_t payload_len = (uint16_t)(1 + 30 + 1);  /* 子命令 + 15寄存器(30B) + percent(1B) */
     int      percent;
-
-    /* AC on 判定相关（Average Current 为 16bit 有符号数，<5 视为 AC 外接电源） */
     int16_t  avg_curr_signed = 0;
     uint8_t  ac_on = 0U;
+    uint8_t  battery_present = 0U;  /* 电池存在标志 */
 
     idx     = 0;
     chg_raw = 0;
     dsg     = 0;
-    percent = -1;
+    percent = 0;  /* 默认值改为 0 */
 
-    val_cycle        = BQ40Z50_Read_CycleCount();
-    val_full_cap     = BQ40Z50_Read_FullChargeCapacity();
-    val_design_cap   = BQ40Z50_Read_DesignCapacity();
-    val_remaining    = BQ40Z50_Read_RemainingCapacity();
-    val_chg_status   = BQ40Z50_Read_ChargingStatus();
-    val_time_to_full = BQ40Z50_Read_TimeToFull();
-    val_temp         = BQ40Z50_Read_Temp();
-    val_vol          = BQ40Z50_Read_Vol();
-    val_curr         = BQ40Z50_Read_Current();
-    val_chg_curr     = BQ40Z50_Read_ChargingCurrent();
-    val_chg_volt     = BQ40Z50_Read_ChargingVoltage();
-    val_bat_mode     = BQ40Z50_Read_BatteryMode();
-    val_avg_curr     = BQ40Z50_Read_AverageCurrent();
-    val_rel_soc      = BQ40Z50_Read_RelativeStateOfCharge();
-    val_abs_soc      = BQ40Z50_Read_AbsoluteStateOfCharge();
-
-    /* 将 0x0B 平均电流解释为有符号 16bit，并用于 AC on 判定 */
-    if (val_avg_curr >= 0) {
-        avg_curr_signed = (int16_t)((uint16_t)val_avg_curr);
-        if (avg_curr_signed >= 0) {       /* >=0 认为 AC 外接电源 */
-            ac_on = 1U;
-        }
-    }
-
-    if ((val_full_cap > 0) && (val_remaining >= 0)) {
-        percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap - MODIFY_FULL_CAP);
-    }
-    percent > 100 ? 100 : percent;
+    /* ========== 步骤1：优先处理关机检测 ========== */
     monitor_pb7_shutdown();
 
+    /* ========== 步骤2：电池存在性检测 ========== */
+    /* 先读取一个寄存器判断设备是否存在 */
+    val_cycle = BQ40Z50_Read_CycleCount();
+    
+    if (val_cycle >= 0) {
+        /* ✅ 电池存在，读取所有寄存器 */
+        battery_present = 1U;
+        
+        val_full_cap     = BQ40Z50_Read_FullChargeCapacity();
+        val_design_cap   = BQ40Z50_Read_DesignCapacity();
+        val_remaining    = BQ40Z50_Read_RemainingCapacity();
+        val_chg_status   = BQ40Z50_Read_ChargingStatus();
+        val_time_to_full = BQ40Z50_Read_TimeToFull();
+        val_temp         = BQ40Z50_Read_Temp();
+        val_vol          = BQ40Z50_Read_Vol();
+        val_curr         = BQ40Z50_Read_Current();
+        val_chg_curr     = BQ40Z50_Read_ChargingCurrent();
+        val_chg_volt     = BQ40Z50_Read_ChargingVoltage();
+        val_bat_mode     = BQ40Z50_Read_BatteryMode();
+        val_avg_curr     = BQ40Z50_Read_AverageCurrent();
+        val_rel_soc      = BQ40Z50_Read_RelativeStateOfCharge();
+        val_abs_soc      = BQ40Z50_Read_AbsoluteStateOfCharge();
+
+        /* ========== 步骤3：计算电量百分比（按您的意图修正） ========== */
+        if ((val_full_cap > MODIFY_FULL_CAP) && (val_remaining >= 0)) {
+            /* 分母减去 MODIFY_FULL_CAP，提前显示满电 */
+            percent = (int)((long long)val_remaining * 100LL / 
+                           ((long long)val_full_cap - MODIFY_FULL_CAP));
+            
+            /* 限制在合理范围 0-100 */
+            if (percent > 100) {
+                percent = 100;
+            }
+            /* 注意：此时 percent 最小值为 0，不会是负数 */
+        } else if (val_full_cap > 0 && val_remaining >= 0) {
+            /* 如果 full_cap <= MODIFY_FULL_CAP（异常情况），用普通算法 */
+            percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap);
+            if (percent > 100) {
+                percent = 100;
+            }
+        } else {
+            /* 数据无效，默认 0% */
+           percent = 0;
+        }
+
+        /* ========== 步骤4：AC 电源检测（改进版） ========== */
+        /* 结合多个指标判断是否有外接电源 */
+        if (val_chg_volt > 15000) {
+            /* 充电电压 > 15V，明确有外接电源 */
+            ac_on = 1U;
+        } else if (val_avg_curr >= 0) {
+            /* 平均电流 >= 0（充电或静态），可能有外接电源 */
+            avg_curr_signed = (int16_t)((uint16_t)val_avg_curr);
+            
+            /* 结合充电电流判断 */
+            if (val_chg_curr > 100) {
+                /* 有充电电流（>100mA），明确有外接电源 */
+                ac_on = 1U;
+            } else if (avg_curr_signed >= 0) {
+                /* 平均电流非负，可能有外接电源 */
+                ac_on = 1U;
+            }
+        }
+    } else {
+        /* ❌ 电池不存在，所有值设为 -1（协议中会转换为 0xFFFF） */
+        battery_present  = 0U;
+        val_cycle        = -1;  /* 这个也要设置，因为会上报 */
+        val_full_cap     = -1;
+        val_design_cap   = -1;
+        val_remaining    = -1;
+        val_chg_status   = -1;
+        val_time_to_full = -1;
+        val_temp         = -1;
+        val_vol          = -1;
+        val_curr         = -1;
+        val_chg_curr     = -1;
+        val_chg_volt     = -1;
+        val_bat_mode     = -1;
+        val_avg_curr     = -1;
+        val_rel_soc      = -1;
+        val_abs_soc      = -1;
+        percent          = -1;  /* 特殊标记：电池不存在 */
+    }
+        /* ========== 步骤5：构建协议帧 ========== */
     len_field = (uint16_t)(1 + payload_len);
     len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
     len_lo    = (uint8_t)(len_field & 0xFF);
@@ -964,7 +1021,7 @@ void periodic_battery_report(void)
     buf[idx++] = 0xFE;
 
     buf[idx++] = 0x81;
-
+        /* 宏：将 int 值转换为大端 16bit（-1 转换为 0xFFFF） */
 #define PUT_16BE_FROM_VAL(v)                          \
     do {                                              \
         uint16_t _u16;                                \
@@ -981,7 +1038,7 @@ void periodic_battery_report(void)
     PUT_16BE_FROM_VAL(val_full_cap);     /* 0x10 Full Charge Capacity */
     PUT_16BE_FROM_VAL(val_design_cap);   /* 0x18 Design Capacity */
     PUT_16BE_FROM_VAL(val_remaining);    /* 0x0F Remaining Capacity */
-    PUT_16BE_FROM_VAL(val_chg_status);   /* 0x16 Charging Status (原始 16bit) */
+    PUT_16BE_FROM_VAL(val_chg_status);   /* 0x16 Charging Status */
     PUT_16BE_FROM_VAL(val_time_to_full); /* 0x13 Time to Full */
     PUT_16BE_FROM_VAL(val_temp);         /* 0x08 Temperature */
     PUT_16BE_FROM_VAL(val_vol);          /* 0x09 Voltage */
@@ -989,52 +1046,65 @@ void periodic_battery_report(void)
     PUT_16BE_FROM_VAL(val_chg_curr);     /* 0x14 Charging Current */
     PUT_16BE_FROM_VAL(val_chg_volt);     /* 0x15 Charging Voltage */
     PUT_16BE_FROM_VAL(val_bat_mode);     /* 0x03 Battery Mode */
-    PUT_16BE_FROM_VAL(val_avg_curr);     /* 0x0B Average Current (原始值) */
+    PUT_16BE_FROM_VAL(val_avg_curr);     /* 0x0B Average Current */
     PUT_16BE_FROM_VAL(val_rel_soc);      /* 0x0D Relative State Of Charge */
     PUT_16BE_FROM_VAL(val_abs_soc);      /* 0x0E Absolute State Of Charge */
 
 #undef PUT_16BE_FROM_VAL
 
-    buf[idx++] = (uint8_t)((percent < 0) ? 0xFF : (percent & 0xFF)); /* percent 放在所有寄存器之后 */
+    /* percent：-1 转换为 0xFF（电池不存在），否则 0-100 */
+    buf[idx++] = (uint8_t)((percent < 0) ? 0xFF : (percent & 0xFF));
 
-    crc_start_index = 3; /* buf[3] = len_hi */
+    /* CRC 计算 */
+    crc_start_index = 3;  /* 从 len_hi 开始 */
     crc_len         = (uint16_t)(idx - crc_start_index);
     crc             = calc_add_crc(&buf[crc_start_index], crc_len);
 
     buf[idx++] = crc;
 
+    /* 尾部 */
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
 
+    /* 发送数据 */
     usart_transmit(USART0, buf, (uint8_t)idx);
+        /* ========== 步骤6：充电控制逻辑 ========== */
 
-    /* ----------------- 串口发送之后的充电控制逻辑（新增 AC on 判断） ----------------- */
-
-    s_charging_active = 0U;
-
-    if (ac_on) { /* 只有外接电源存在时才考虑充电 */
-        if (percent >= 0) {
-            if (percent < 100) {
-                s_charging_active = 1U;
-            } else {
-                s_charging_active = 0U;
-            }
-        } else {
-            s_charging_active = 0U;
-        }
-    } else {
-        s_charging_active = 0U;
+    /* 6.1 电池不存在时，关闭所有充电功能 */
+    if (!battery_present) {
+        gpio_bit_reset(GPIOB, GPIO_PIN_6);  /* 关闭充电 */
+        s_bat_led_on = 0U;
+        gpio_bit_reset(GPIOC, GPIO_PIN_13); /* 关闭 LED */
+        return;
     }
 
+    /* 6.2 初始化充电状态 */
+    s_charging_active = 0U;
+
+    /* 6.3 根据 AC 状态和电量决定是否充电 */
+    if (ac_on) {
+        /* 有外接电源 */
+        if (percent < 100) {
+            /* 电量未满，开启充电 */
+            s_charging_active = 1U;
+        }
+        /* percent == 100 时，s_charging_active 保持 0U */
+    }
+    /* 无外接电源时，s_charging_active 保持 0U */
+
+    /* 6.4 读取 DSG 状态（预留，当前未使用） */
     if (val_chg_status >= 0) {
         chg_raw = (uint16_t)val_chg_status;
         dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
     }
 
+    /* 6.5 控制充电硬件和指示灯 */
     if (s_charging_active) {
+        /* 开启充电 */
         gpio_bit_set(GPIOB, GPIO_PIN_6);
 
+        /* LED 闪烁（表示正在充电） */
         s_bat_led_on = (uint8_t)!s_bat_led_on;
         if (s_bat_led_on) {
             gpio_bit_set(GPIOC, GPIO_PIN_13);
@@ -1042,8 +1112,10 @@ void periodic_battery_report(void)
             gpio_bit_reset(GPIOC, GPIO_PIN_13);
         }
     } else {
+        /* 关闭充电 */
         gpio_bit_reset(GPIOB, GPIO_PIN_6);
 
+        /* LED 熄灭 */
         s_bat_led_on = 0U;
         gpio_bit_reset(GPIOC, GPIO_PIN_13);
     }
