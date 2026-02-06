@@ -1120,3 +1120,58 @@ void periodic_battery_report(void)
         gpio_bit_reset(GPIOC, GPIO_PIN_13);
     }
 }
+
+/* ========================= 电池低电量判断 ========================= */
+
+/*!
+    \brief      判断电池电量是否在 0-3% 范围内
+    \param[in]  none
+    \param[out] none
+    \retval     1: 电量在 0-3% 范围内
+                0: 电量不在该范围内或读取失败
+*/
+uint8_t is_battery_low_capacity(void)
+{
+    int val_full_cap;
+    int val_remaining;
+    int percent;
+
+    /* 读取满电容量 */
+    val_full_cap = BQ40Z50_Read_FullChargeCapacity();
+    if (val_full_cap <= 0) {
+        /* 读取失败，返回 0 */
+        return 0;
+    }
+
+    /* 读取剩余容量 */
+    val_remaining = BQ40Z50_Read_RemainingCapacity();
+    if (val_remaining < 0) {
+        /* 读取失败，返回 0 */
+        return 0;
+    }
+
+    /* 计算电量百分比（使用与周期上报相同的算法） */
+    if (val_full_cap > MODIFY_FULL_CAP) {
+        /* 分母减去 MODIFY_FULL_CAP */
+        percent = (int)((long long)val_remaining * 100LL /
+                       ((long long)val_full_cap - MODIFY_FULL_CAP));
+    } else {
+        /* 使用普通算法 */
+        percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap);
+    }
+
+    /* 限制在合理范围 */
+    if (percent < 0) {
+        percent = 0;
+    } else if (percent > 100) {
+        percent = 100;
+    }
+
+    /* 判断是否在 0-3% 范围内 */
+    if (percent >= 0 && percent <= 3) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+

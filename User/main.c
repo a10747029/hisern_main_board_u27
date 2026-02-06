@@ -25,6 +25,7 @@ void com_init0(void);
 void com_init1(void);
 void process_command(void);
 void periodic_report(void);
+uint8_t is_battery_low_capacity(void);
 
 uint8_t need_process_command  = 0;
 uint8_t need_periodic_report  = 0;
@@ -73,6 +74,12 @@ int main(void)
     com_init1();
     power_init();
     BQ40Z50_Init();
+
+    if(is_battery_low_capacity())
+    {
+	shutdown_execute();
+	while(1);
+    }
 
     while (1) {
         if (need_process_command) {
