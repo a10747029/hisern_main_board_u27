@@ -2,31 +2,16 @@
 #include "string.h"
 #include "stdint.h"
 
-/* ========================= USART 初始化 ========================= */
-
-void com_init0(void)    /* PA9: TX, PA10: RX */
+void com_init0(void)
 {
-    /* enable GPIO clock */
     rcu_periph_clock_enable(RCU_GPIOA);
-
-    /* enable USART clock */
     rcu_periph_clock_enable(RCU_USART0);
-
-    /* connect port to USARTx_Tx */
     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
-
-    /* connect port to USARTx_Rx */
     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
-
-    /* configure USART Tx as alternate function push-pull */
     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_9);
-
-    /* configure USART Rx as alternate function push-pull */
     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_10);
-
-    /* USART configure */
     usart_deinit(USART0);
     usart_baudrate_set(USART0, 115200U);
     usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
@@ -35,22 +20,13 @@ void com_init0(void)    /* PA9: TX, PA10: RX */
     usart_enable(USART0);
 }
 
-void com_init1(void)    /* PA15: RX (USART1) */
+void com_init1(void)
 {
-    /* enable GPIO clock */
     rcu_periph_clock_enable(RCU_GPIOA);
-
-    /* enable USART clock */
     rcu_periph_clock_enable(RCU_USART1);
-
-    /* connect port to USARTx_Rx */
     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_15);
-
-    /* configure USART Rx as alternate function push-pull */
     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_15);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_15);
-
-    /* USART configure */
     usart_deinit(USART1);
     usart_baudrate_set(USART1, 115200U);
     usart_transmit_config(USART1, USART_TRANSMIT_ENABLE);
@@ -58,8 +34,6 @@ void com_init1(void)    /* PA15: RX (USART1) */
     usart_interrupt_enable(USART1, USART_INT_RBNE);
     usart_enable(USART1);
 }
-
-/* ========================= 电源阈值定义 ========================= */
 
 #define ADC_IN0_VCC24_MIN              3217
 #define ADC_IN0_VCC24_MAX              3574
@@ -78,61 +52,41 @@ void com_init1(void)    /* PA15: RX (USART1) */
 void delay(int time);
 extern uint8_t adc_value[20];
 
-/* ========================= 电源初始化 ========================= */
-/*
- * PA0 : 3V3 ULP
- * PA1 : 5V0 SYS
- * PA4 : 5V0 CORE
- * PA5 : 3V3 SYS
- * PA6 : 12V SYS
- * PA7 : another power
- * PB6 : 充电控制 (高=充电, 低=停止充电)
- * PB7 : 外部关机检测输入
- */
 void power_init(void)
 {
     rcu_periph_clock_enable(RCU_GPIOA);
     rcu_periph_clock_enable(RCU_GPIOB);
 
-    /* 3v3 ulp */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_0);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_0);
     gpio_bit_reset(GPIOA, GPIO_PIN_0);
 
-    /* 5v0 sys */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_1);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_1);
     gpio_bit_reset(GPIOA, GPIO_PIN_1);
 
-    /* 5v0 core */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_4);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_4);
     gpio_bit_reset(GPIOA, GPIO_PIN_4);
 
-    /* 3v3 sys */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_5);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_5);
     gpio_bit_reset(GPIOA, GPIO_PIN_5);
 
-    /* 12v sys */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_6);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_6);
     gpio_bit_reset(GPIOA, GPIO_PIN_6);
 
-    /* another power */
     gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_7);
     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_7);
     gpio_bit_reset(GPIOA, GPIO_PIN_7);
 
-    /* 充电控制 PB6：输出，默认低电平(不充电) */
     gpio_mode_set(GPIOB, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO_PIN_6);
     gpio_output_options_set(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_6);
     gpio_bit_reset(GPIOB, GPIO_PIN_6);
 
-    /* PB7: 输入，用于关机检测，使用上拉避免悬空 */
     gpio_mode_set(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, GPIO_PIN_7);
 
-    /* hardware define boot sequence */
     gpio_bit_set(GPIOA, GPIO_PIN_0);
     delay(10);
     gpio_bit_set(GPIOA, GPIO_PIN_7);
@@ -144,11 +98,8 @@ void power_init(void)
     gpio_bit_set(GPIOA, GPIO_PIN_5);
     delay(100);
 
-    /* 原来 #if 0 中的 ADC 检查逻辑是关闭状态，这里保持原有行为：直接打开 5V0 CORE */
     gpio_bit_set(GPIOA, GPIO_PIN_4);
 }
-
-/* ========================= USART 发送 ========================= */
 
 void usart_transmit(uint32_t usart_periph, uint8_t *data, uint8_t length)
 {
@@ -159,8 +110,6 @@ void usart_transmit(uint32_t usart_periph, uint8_t *data, uint8_t length)
         while (RESET == usart_flag_get(usart_periph, USART_FLAG_TBE));
     }
 }
-
-/* ========================= Host 协议处理 ========================= */
 
 #define HOST_RECEIVE_COUNT                 6
 #define HOST_COMMAND_HEART_BEAT            0x00
@@ -177,13 +126,11 @@ extern uint8_t adc_value[];
 extern uint8_t host_receiver_buffer[HOST_RECEIVE_COUNT];
 extern uint8_t host_bootup_ok;
 
-/* 关机倒计时及执行函数（在 main.c 中定义） */
 extern volatile uint32_t shutdown_counter;
 extern void shutdown_execute(void);
 
 int battery_temp_data = -1;
 
-/* 回复缓冲区 */
 uint8_t host_reply_heart_beat_buffer[6]          = {0x55, 0xaa, HOST_COMMAND_HEART_BEAT,           0x00, 0x00, 0xff};
 uint8_t host_reply_get_power_status_buffer[6]    = {0x55, 0xaa, HOST_COMMAND_GET_POWER_STATUS,     0x00, 0x00, 0xff};
 uint8_t host_reply_set_power_status_buffer[6]    = {0x55, 0xaa, HOST_COMMAND_SET_POWER_STATUS,     0x00, 0x00, 0xff};
@@ -201,12 +148,10 @@ uint8_t host_reply_shutdown_buffer[6]            = {0x55, 0xaa, HOST_COMMAND_SHU
 uint8_t host_reply_bootup_success_buffer[6]      = {0x55, 0xaa, HOST_COMMAND_BOOTUP_SUCCESS,       0x00, 0x00, 0xff};
 uint8_t host_reply_error_status_buffer[6]        = {0x55, 0xaa, 0xff, 0xff, 0xff, 0xff};
 
-/*               3v3 ulp     5v0 sys    5v0 core    3v3 sys     12v sys  */
 uint32_t pin_power_map[] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6};
 
 void process_command(void)
 {
-    /* 帧格式固定为: [0]=0xaa, [1]=0x55, [2]=cmd, [3],[4]=data, [5]=0xff */
     if ((host_receiver_buffer[0] == 0xaa) &&
         (host_receiver_buffer[1] == 0x55) &&
         (host_receiver_buffer[5] == 0xff)) {
@@ -298,12 +243,10 @@ void process_command(void)
         
         case HOST_COMMAND_SHUTDOWN:
         {
-            /* 解析上位机传过来的关机时间（单位：秒） */
             uint16_t shutdown_time =
                 (uint16_t)(((uint16_t)host_receiver_buffer[3] << 8) |
                            (uint16_t)host_receiver_buffer[4]);
 
-            /* 回显设置的时间（高/低字节） */
             host_reply_shutdown_buffer[3] = host_receiver_buffer[3];
             host_reply_shutdown_buffer[4] = host_receiver_buffer[4];
             usart_transmit(USART0,
@@ -311,11 +254,9 @@ void process_command(void)
                            sizeof(host_reply_shutdown_buffer));
 
             if (shutdown_time == 0) {
-                /* 立刻关机：直接拉低 PA7 */
                 shutdown_counter = 0;
                 shutdown_execute();
             } else {
-                /* 延时关机：利用 UART1 每秒一帧递减 shutdown_counter */
                 shutdown_counter = shutdown_time;
             }
             break;
@@ -337,8 +278,6 @@ void process_command(void)
     }
 }
 
-/* ========================= 周期上报 ADC ========================= */
-
 #define PERIODIC_REPORT_ADC_VALUE 0x22
 
 uint8_t periodic_report_adc_value_buffer[24] = {
@@ -359,12 +298,10 @@ void periodic_report(void)
                    sizeof(periodic_report_adc_value_buffer));
 }
 
-/* ========================= CRC8 计算 ========================= */
-
 uint8_t crc8(uint8_t *data, int length)
 {
-    uint8_t crc  = 0x00; /* 初始值 */
-    uint8_t poly = 0x07; /* 生成多项式 x^8 + x^2 + x + 1 */
+    uint8_t crc  = 0x00;
+    uint8_t poly = 0x07;
     int i, j;
 
     for (i = 0; i < length; i++) {
@@ -380,34 +317,23 @@ uint8_t crc8(uint8_t *data, int length)
     return crc;
 }
 
-/* ========================= I2C + BQ40Z50 支持（硬件 I2C） ========================= */
-
 static void Delay(int n)
 {
     int target_time = 1 * n;
     while (target_time--);
 }
 
-/*!
-    \brief      enable the peripheral clock
-*/
 void rcu_config(void)
 {
-    /* enable GPIOB clock */
     rcu_periph_clock_enable(RCU_GPIOB);
-    /* enable I2C clock */
     rcu_periph_clock_enable(RCU_I2C0);
 }
 
-/*!
-    \brief      configure the GPIO ports for I2C
-*/
 #define I2C_SCL_GPIO_PIN   GPIO_PIN_8
 #define I2C_SDA_GPIO_PIN   GPIO_PIN_9
 
 void gpio_config(void)
 {
-    /* I2C GPIO ports: PB8(SCL), PB9(SDA) */
     gpio_af_set(GPIOB, GPIO_AF_1, I2C_SCL_GPIO_PIN);
     gpio_af_set(GPIOB, GPIO_AF_1, I2C_SDA_GPIO_PIN);
 
@@ -418,24 +344,14 @@ void gpio_config(void)
     gpio_output_options_set(GPIOB, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, I2C_SDA_GPIO_PIN);
 }
 
-/*!
-    \brief      configure the I2C interface
-*/
 void i2c_config(void)
 {
-    /* 先复位 I2C，清除潜在挂死状态 */
     i2c_deinit(I2C0);
-
-    /* I2C clock configure: 100kHz */
     i2c_clock_config(I2C0, 100000, I2C_DTCY_2);
-
-    /* 主模式不设置本机地址 */
-
     i2c_enable(I2C0);
     i2c_ack_config(I2C0, I2C_ACK_ENABLE);
 }
 
-/* I2C 扫描总线（调试用） */
 void i2c_scan(uint32_t i2c_bus)
 {
     uint8_t addr;
@@ -446,17 +362,13 @@ void i2c_scan(uint32_t i2c_bus)
     for (addr = 0; addr < 0x80; addr++) {
         timeout = 1000;
 
-        /* wait bus idle */
         while (i2c_flag_get(i2c_bus, I2C_FLAG_I2CBSY));
 
-        /* start */
         i2c_start_on_bus(i2c_bus);
         while (!i2c_flag_get(i2c_bus, I2C_FLAG_SBSEND));
 
-        /* send address */
         i2c_master_addressing(i2c_bus, addr, I2C_TRANSMITTER);
 
-        /* wait ACK */
         while (!i2c_flag_get(i2c_bus, I2C_FLAG_ADDSEND) && --timeout);
 
         if (timeout > 0) {
@@ -466,7 +378,6 @@ void i2c_scan(uint32_t i2c_bus)
             printf("not Found device at 0x%02X\r\n", addr);
         }
 
-        /* stop */
         i2c_stop_on_bus(i2c_bus);
         while (I2C_CTL0(i2c_bus) & I2C_CTL0_STOP);
     }
@@ -474,7 +385,6 @@ void i2c_scan(uint32_t i2c_bus)
     printf("Scan complete\r\n");
 }
 
-/* BQ40Z50 初始化：时钟 -> GPIO -> I2C */
 void BQ40Z50_Init(void)
 {
     rcu_config();
@@ -482,15 +392,12 @@ void BQ40Z50_Init(void)
     i2c_config();
 }
 
-/* ========= 通用 I2C 寄存器读取函数 ========= */
-/* 读取 16bit 寄存器（高字节在前：MSB:高字节, LSB:低字节），保持与原先组合方式一致：result = (msb<<8)|lsb */
 int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
 {
     uint8_t msb = 0, lsb = 0;
     int timeout;
     uint16_t result;
 
-    /* STEP 1: Wait until bus is idle */
     timeout = 10000;
     while (i2c_flag_get(i2c_bus, I2C_FLAG_I2CBSY) && --timeout);
     if (timeout <= 0) {
@@ -498,7 +405,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
         goto error;
     }
 
-    /* STEP 2: Send START */
     i2c_start_on_bus(i2c_bus);
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_SBSEND) && --timeout);
@@ -507,7 +413,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
         goto error;
     }
 
-    /* STEP 3: Send slave address with write bit */
     i2c_master_addressing(i2c_bus, i2c_addr, I2C_TRANSMITTER);
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_ADDSEND) && --timeout);
@@ -517,7 +422,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     }
     i2c_flag_clear(i2c_bus, I2C_STAT0_ADDSEND);
 
-    /* STEP 4: Send register address */
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_TBE) && --timeout);
     if (timeout <= 0) {
@@ -534,7 +438,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
         goto error;
     }
 
-    /* STEP 5: Repeated START */
     i2c_start_on_bus(i2c_bus);
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_SBSEND) && --timeout);
@@ -543,7 +446,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
         goto error;
     }
 
-    /* STEP 6: Send slave address with read bit */
     i2c_master_addressing(i2c_bus, i2c_addr, I2C_RECEIVER);
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_ADDSEND) && --timeout);
@@ -553,10 +455,8 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     }
     i2c_flag_clear(i2c_bus, I2C_STAT0_ADDSEND);
 
-    /* STEP 7: Enable ACK (for first byte) */
     i2c_ack_config(i2c_bus, I2C_ACK_ENABLE);
 
-    /* STEP 8: Wait RBNE then read LSB (第一字节) */
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_RBNE) && --timeout);
     if (timeout <= 0) {
@@ -565,11 +465,9 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     }
     lsb = i2c_data_receive(i2c_bus);
 
-    /* STEP 9: Disable ACK, send STOP before reading second byte */
     i2c_ack_config(i2c_bus, I2C_ACK_DISABLE);
     i2c_stop_on_bus(i2c_bus);
 
-    /* STEP 10: Wait RBNE then read MSB (第二字节) */
     timeout = 10000;
     while (!i2c_flag_get(i2c_bus, I2C_FLAG_RBNE) && --timeout);
     if (timeout <= 0) {
@@ -578,7 +476,6 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
     }
     msb = i2c_data_receive(i2c_bus);
 
-    /* STEP 11: Wait for STOP to complete */
     timeout = 10000;
     while ((I2C_CTL0(i2c_bus) & I2C_CTL0_STOP) && --timeout);
     if (timeout <= 0) {
@@ -586,16 +483,13 @@ int i2c_read_register2(uint32_t i2c_bus, uint8_t i2c_addr, uint8_t reg_addr)
         goto error;
     }
 
-    /* STEP 12: Restore ACK config */
     i2c_ack_config(i2c_bus, I2C_ACK_ENABLE);
     i2c_ackpos_config(i2c_bus, I2C_ACKPOS_CURRENT);
 
-    /* 按原逻辑：高字节在前 */
     result = (uint16_t)((msb << 8) | lsb);
     return (int)result;
 
 error:
-    /* emergency recovery */
     i2c_stop_on_bus(i2c_bus);
     timeout = 10000;
     while ((I2C_CTL0(i2c_bus) & I2C_CTL0_STOP) && --timeout);
@@ -605,14 +499,10 @@ error:
     return -1;
 }
 
-/* BQ40Z50 器件地址、总线常量 */
 #define BQ40Z50_I2C_BUS      I2C0
-#define BQ40Z50_I2C_ADDR     0x16  /* 与原代码一致 */
+#define BQ40Z50_I2C_ADDR     0x16
 
-/* ========= BQ40Z50 寄存器封装 ========= */
-/* 注意：这里只做“读取原始寄存器值”的封装，不做物理单位换算，以保证与原逻辑一致 */
-
-int BQ40Z50_Read_SOC(void)          /* 原有：电量百分比，寄存器 0x0D */
+int BQ40Z50_Read_SOC(void)
 {
     int attempt;
     int soc_raw = -1;
@@ -631,7 +521,6 @@ int BQ40Z50_Read_SOC(void)          /* 原有：电量百分比，寄存器 0x0D
     return -1;
 }
 
-/* 电池温度：0x08（原有函数保持） */
 int BQ40Z50_Read_Temp(void)
 {
     int attempt;
@@ -651,7 +540,6 @@ int BQ40Z50_Read_Temp(void)
     return -1;
 }
 
-/* 电池电压：0x09（原有函数保持） */
 int BQ40Z50_Read_Vol(void)
 {
     int attempt;
@@ -671,102 +559,73 @@ int BQ40Z50_Read_Vol(void)
     return -1;
 }
 
-/* ========= 你列出的其它寄存器，分别封装为独立函数 ========= */
-
-/* 充电次数（Cycle Count）：寄存器 0x17 */
 int BQ40Z50_Read_CycleCount(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x17);
 }
 
-/* 电池满电容量（Full Charge Capacity）：寄存器 0x10 */
 int BQ40Z50_Read_FullChargeCapacity(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x10);
 }
 
-/* 电池设计容量（Design Capacity）：寄存器 0x18 */
 int BQ40Z50_Read_DesignCapacity(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x18);
 }
 
-/* 剩余容量（Remaining Capacity）：寄存器 0x0F */
 int BQ40Z50_Read_RemainingCapacity(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0F);
 }
 
-/* 是否在充电（Charging Status 等）：寄存器 0x16
- * 具体 bit 含义由上层解析，这里只返回原始 16bit 数据
- */
 int BQ40Z50_Read_ChargingStatus(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x16);
 }
 
-/* 预计充满时间（Time to Full）：寄存器 0x13 */
 int BQ40Z50_Read_TimeToFull(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x13);
 }
 
-/* 电池电流（Current）：寄存器 0x0A */
 int BQ40Z50_Read_Current(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0A);
 }
 
-/* 充电电流（Charging Current）：寄存器 0x14 */
 int BQ40Z50_Read_ChargingCurrent(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x14);
 }
 
-/* 充电电压（Charging Voltage）：寄存器 0x15 */
 int BQ40Z50_Read_ChargingVoltage(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x15);
 }
 
-/* 电池模式（Battery Mode）：寄存器 0x03 */
 int BQ40Z50_Read_BatteryMode(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x03);
 }
 
-/* 平均电流（Average Current）：寄存器 0x0B */
 int BQ40Z50_Read_AverageCurrent(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0B);
 }
 
-/* 相对剩余电量（Relative State Of Charge）：寄存器 0x0D */
 int BQ40Z50_Read_RelativeStateOfCharge(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0D);
 }
 
-/* 绝对剩余电量（Absolute State Of Charge）：寄存器 0x0E */
 int BQ40Z50_Read_AbsoluteStateOfCharge(void)
 {
     return i2c_read_register2(BQ40Z50_I2C_BUS, BQ40Z50_I2C_ADDR, 0x0E);
 }
 
-/* ========================= 周期上报（新协议 AA AA AA） ========================= */
-/*
- * 协议格式：
- *   Header : 0xAA 0xAA 0xAA
- *   Len    : 2 字节，大端，高字节在前，值 = Type(1) + DataLen(1+N) + Len字段本身(2)
- *   Type   : 0xFE
- *   Data   : [SubCmd(1)] + Payload(N)
- *   CRC    : 1 字节，普通累加取低 8 位（从 Len 高字节到 Data 最后一字节）
- *   Tail   : 0xFF 0xFF 0xFF
- */
-
 extern uint8_t adc_value[20];
 
-/* ----------- 普通累加 CRC 计算（仅用于新协议） ----------- */
 static uint8_t calc_add_crc(uint8_t *data, uint16_t length)
 {
     uint32_t sum = 0;
@@ -779,64 +638,50 @@ static uint8_t calc_add_crc(uint8_t *data, uint16_t length)
     return (uint8_t)(sum & 0xFF);
 }
 
-/* ----------- 20 路 ADC 周期上报，子命令 0x80 ----------- */
-/* 数据体 = [0x80] + 20 字节 adc_value */
 void periodic_adc_report(void)
 {
-    uint8_t buf[64];  /* 足够容纳本帧 */
+    uint8_t buf[64];
     uint16_t idx = 0;
-    uint16_t len_field;      /* 协议中的长度值 */
+    uint16_t len_field;
     uint8_t  len_hi, len_lo;
     uint8_t  crc;
     uint16_t crc_start_index;
     uint16_t crc_len;
     uint8_t  i;
 
-    /* 有效数据长度（子命令 + 20 字节 ADC） */
     const uint16_t payload_len = 1 + 20;
-    /* Type(1) + Data(1+20) + Len(2) */
     len_field = 1 + payload_len ;
     len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
     len_lo    = (uint8_t)(len_field & 0xFF);
 
-    /* Header */
     buf[idx++] = 0xAA;
     buf[idx++] = 0xAA;
     buf[idx++] = 0xAA;
 
-    /* Length (2B, big endian) */
     buf[idx++] = len_hi;
     buf[idx++] = len_lo;
 
-    /* Type */
     buf[idx++] = 0xFE;
 
-    /* Data: SubCmd */
     buf[idx++] = 0x80;
 
-    /* Data: Payload (20 bytes ADC) */
     for (i = 0; i < 20; i++) {
         buf[idx++] = adc_value[i];
     }
 
-    /* 计算 CRC：从 len_hi 开始到最后一个数据字节 */
-    crc_start_index = 3; /* buf[3] = len_hi */
+    crc_start_index = 3;
     crc_len         = idx - crc_start_index;
     crc             = calc_add_crc(&buf[crc_start_index], crc_len);
 
-    /* CRC */
     buf[idx++] = crc;
 
-    /* Tail */
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
 
-    /* 通过 USART0 发送 */
     usart_transmit(USART0, buf, (uint8_t)idx);
 }
 
-/* ---------------- PB7 关机检测 ---------------- */
 static uint8_t s_bat_led_on = 0;
 static uint8_t s_charging_active = 0;
 static uint8_t s_pb7_low_seconds = 0;
@@ -859,27 +704,6 @@ static void monitor_pb7_shutdown(void)
         s_pb7_low_seconds = 0U;
     }
 }
-
-/* ----------- 电池信息周期上报，子命令 0x81 ----------- */
-/*
- * 需要实时读取寄存器（大端在前）：
- *   0x17 Cycle Count
- *   0x10 Full Charge Capacity
- *   0x18 Design Capacity
- *   0x0F Remaining Capacity
- *   0x16 Charging Status
- *   0x13 Time to Full
- *   0x08 Temp
- *   0x09 Voltage
- *   0x0A Current
- *   0x14 Charging Current
- *   0x15 Charging Voltage
- *   0x03 Battery Mode
- *   0x0B Average Current
- *   0x0D Relative State Of Charge
- *   0x0E Absolute State Of Charge
- * 最后追加 percent（1 字节，使用新公式）再计算 CRC。
- */
 
 void periodic_battery_report(void)
 {
@@ -909,26 +733,22 @@ void periodic_battery_report(void)
     int      val_abs_soc;
     const uint16_t DSG_MASK = (1U << 6);
     uint8_t  dsg;
-    const uint16_t payload_len = (uint16_t)(1 + 30 + 1);  /* 子命令 + 15寄存器(30B) + percent(1B) */
+    const uint16_t payload_len = (uint16_t)(1 + 30 + 1);
     int      percent;
     int16_t  avg_curr_signed = 0;
     uint8_t  ac_on = 0U;
-    uint8_t  battery_present = 0U;  /* 电池存在标志 */
+    uint8_t  battery_present = 0U;
 
     idx     = 0;
     chg_raw = 0;
     dsg     = 0;
-    percent = 0;  /* 默认值改为 0 */
+    percent = 0;
 
-    /* ========== 步骤1：优先处理关机检测 ========== */
     monitor_pb7_shutdown();
 
-    /* ========== 步骤2：电池存在性检测 ========== */
-    /* 先读取一个寄存器判断设备是否存在 */
     val_cycle = BQ40Z50_Read_CycleCount();
     
     if (val_cycle >= 0) {
-        /* ✅ 电池存在，读取所有寄存器 */
         battery_present = 1U;
         
         val_full_cap     = BQ40Z50_Read_FullChargeCapacity();
@@ -946,50 +766,36 @@ void periodic_battery_report(void)
         val_rel_soc      = BQ40Z50_Read_RelativeStateOfCharge();
         val_abs_soc      = BQ40Z50_Read_AbsoluteStateOfCharge();
 
-        /* ========== 步骤3：计算电量百分比（按您的意图修正） ========== */
         if ((val_full_cap > MODIFY_FULL_CAP) && (val_remaining >= 0)) {
-            /* 分母减去 MODIFY_FULL_CAP，提前显示满电 */
             percent = (int)((long long)val_remaining * 100LL / 
                            ((long long)val_full_cap - MODIFY_FULL_CAP));
             
-            /* 限制在合理范围 0-100 */
             if (percent > 100) {
                 percent = 100;
             }
-            /* 注意：此时 percent 最小值为 0，不会是负数 */
         } else if (val_full_cap > 0 && val_remaining >= 0) {
-            /* 如果 full_cap <= MODIFY_FULL_CAP（异常情况），用普通算法 */
             percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap);
             if (percent > 100) {
                 percent = 100;
             }
         } else {
-            /* 数据无效，默认 0% */
-           percent = 0;
+            percent = 0;
         }
 
-        /* ========== 步骤4：AC 电源检测（改进版） ========== */
-        /* 结合多个指标判断是否有外接电源 */
         if (val_chg_volt > 15000) {
-            /* 充电电压 > 15V，明确有外接电源 */
             ac_on = 1U;
         } else if (val_avg_curr >= 0) {
-            /* 平均电流 >= 0（充电或静态），可能有外接电源 */
             avg_curr_signed = (int16_t)((uint16_t)val_avg_curr);
             
-            /* 结合充电电流判断 */
             if (val_chg_curr > 100) {
-                /* 有充电电流（>100mA），明确有外接电源 */
                 ac_on = 1U;
             } else if (avg_curr_signed >= 0) {
-                /* 平均电流非负，可能有外接电源 */
                 ac_on = 1U;
             }
         }
     } else {
-        /* ❌ 电池不存在，所有值设为 -1（协议中会转换为 0xFFFF） */
         battery_present  = 0U;
-        val_cycle        = -1;  /* 这个也要设置，因为会上报 */
+        val_cycle        = -1;
         val_full_cap     = -1;
         val_design_cap   = -1;
         val_remaining    = -1;
@@ -1004,9 +810,9 @@ void periodic_battery_report(void)
         val_avg_curr     = -1;
         val_rel_soc      = -1;
         val_abs_soc      = -1;
-        percent          = -1;  /* 特殊标记：电池不存在 */
+        percent          = -1;
     }
-        /* ========== 步骤5：构建协议帧 ========== */
+        
     len_field = (uint16_t)(1 + payload_len);
     len_hi    = (uint8_t)((len_field >> 8) & 0xFF);
     len_lo    = (uint8_t)(len_field & 0xFF);
@@ -1021,7 +827,7 @@ void periodic_battery_report(void)
     buf[idx++] = 0xFE;
 
     buf[idx++] = 0x81;
-        /* 宏：将 int 值转换为大端 16bit（-1 转换为 0xFFFF） */
+        
 #define PUT_16BE_FROM_VAL(v)                          \
     do {                                              \
         uint16_t _u16;                                \
@@ -1034,77 +840,61 @@ void periodic_battery_report(void)
         buf[idx++] = (uint8_t)(_u16 & 0xFF);          \
     } while (0)
 
-    PUT_16BE_FROM_VAL(val_cycle);        /* 0x17 Cycle Count */
-    PUT_16BE_FROM_VAL(val_full_cap);     /* 0x10 Full Charge Capacity */
-    PUT_16BE_FROM_VAL(val_design_cap);   /* 0x18 Design Capacity */
-    PUT_16BE_FROM_VAL(val_remaining);    /* 0x0F Remaining Capacity */
-    PUT_16BE_FROM_VAL(val_chg_status);   /* 0x16 Charging Status */
-    PUT_16BE_FROM_VAL(val_time_to_full); /* 0x13 Time to Full */
-    PUT_16BE_FROM_VAL(val_temp);         /* 0x08 Temperature */
-    PUT_16BE_FROM_VAL(val_vol);          /* 0x09 Voltage */
-    PUT_16BE_FROM_VAL(val_curr);         /* 0x0A Current */
-    PUT_16BE_FROM_VAL(val_chg_curr);     /* 0x14 Charging Current */
-    PUT_16BE_FROM_VAL(val_chg_volt);     /* 0x15 Charging Voltage */
-    PUT_16BE_FROM_VAL(val_bat_mode);     /* 0x03 Battery Mode */
-    PUT_16BE_FROM_VAL(val_avg_curr);     /* 0x0B Average Current */
-    PUT_16BE_FROM_VAL(val_rel_soc);      /* 0x0D Relative State Of Charge */
-    PUT_16BE_FROM_VAL(val_abs_soc);      /* 0x0E Absolute State Of Charge */
+    PUT_16BE_FROM_VAL(val_cycle);
+    PUT_16BE_FROM_VAL(val_full_cap);
+    PUT_16BE_FROM_VAL(val_design_cap);
+    PUT_16BE_FROM_VAL(val_remaining);
+    PUT_16BE_FROM_VAL(val_chg_status);
+    PUT_16BE_FROM_VAL(val_time_to_full);
+    PUT_16BE_FROM_VAL(val_temp);
+    PUT_16BE_FROM_VAL(val_vol);
+    PUT_16BE_FROM_VAL(val_curr);
+    PUT_16BE_FROM_VAL(val_chg_curr);
+    PUT_16BE_FROM_VAL(val_chg_volt);
+    PUT_16BE_FROM_VAL(val_bat_mode);
+    PUT_16BE_FROM_VAL(val_avg_curr);
+    PUT_16BE_FROM_VAL(val_rel_soc);
+    PUT_16BE_FROM_VAL(val_abs_soc);
 
 #undef PUT_16BE_FROM_VAL
 
-    /* percent：-1 转换为 0xFF（电池不存在），否则 0-100 */
     buf[idx++] = (uint8_t)((percent < 0) ? 0xFF : (percent & 0xFF));
 
-    /* CRC 计算 */
-    crc_start_index = 3;  /* 从 len_hi 开始 */
+    crc_start_index = 3;
     crc_len         = (uint16_t)(idx - crc_start_index);
     crc             = calc_add_crc(&buf[crc_start_index], crc_len);
 
     buf[idx++] = crc;
 
-    /* 尾部 */
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
     buf[idx++] = 0xFF;
 
-    /* 发送数据 */
     usart_transmit(USART0, buf, (uint8_t)idx);
-        /* ========== 步骤6：充电控制逻辑 ========== */
 
-    /* 6.1 电池不存在时，关闭所有充电功能 */
     if (!battery_present) {
-        gpio_bit_reset(GPIOB, GPIO_PIN_6);  /* 关闭充电 */
+        gpio_bit_reset(GPIOB, GPIO_PIN_6);
         s_bat_led_on = 0U;
-        gpio_bit_reset(GPIOC, GPIO_PIN_13); /* 关闭 LED */
+        gpio_bit_reset(GPIOC, GPIO_PIN_13);
         return;
     }
 
-    /* 6.2 初始化充电状态 */
     s_charging_active = 0U;
 
-    /* 6.3 根据 AC 状态和电量决定是否充电 */
     if (ac_on) {
-        /* 有外接电源 */
         if (percent < 100) {
-            /* 电量未满，开启充电 */
             s_charging_active = 1U;
         }
-        /* percent == 100 时，s_charging_active 保持 0U */
     }
-    /* 无外接电源时，s_charging_active 保持 0U */
 
-    /* 6.4 读取 DSG 状态（预留，当前未使用） */
     if (val_chg_status >= 0) {
         chg_raw = (uint16_t)val_chg_status;
         dsg = (chg_raw & DSG_MASK) ? 1U : 0U;
     }
 
-    /* 6.5 控制充电硬件和指示灯 */
     if (s_charging_active) {
-        /* 开启充电 */
         gpio_bit_set(GPIOB, GPIO_PIN_6);
 
-        /* LED 闪烁（表示正在充电） */
         s_bat_led_on = (uint8_t)!s_bat_led_on;
         if (s_bat_led_on) {
             gpio_bit_set(GPIOC, GPIO_PIN_13);
@@ -1112,66 +902,45 @@ void periodic_battery_report(void)
             gpio_bit_reset(GPIOC, GPIO_PIN_13);
         }
     } else {
-        /* 关闭充电 */
         gpio_bit_reset(GPIOB, GPIO_PIN_6);
 
-        /* LED 熄灭 */
         s_bat_led_on = 0U;
         gpio_bit_reset(GPIOC, GPIO_PIN_13);
     }
 }
 
-/* ========================= 电池低电量判断 ========================= */
-
-/*!
-    \brief      判断电池电量是否在 0-3% 范围内
-    \param[in]  none
-    \param[out] none
-    \retval     1: 电量在 0-3% 范围内
-                0: 电量不在该范围内或读取失败
-*/
 uint8_t is_battery_low_capacity(void)
 {
     int val_full_cap;
     int val_remaining;
     int percent;
 
-    /* 读取满电容量 */
     val_full_cap = BQ40Z50_Read_FullChargeCapacity();
     if (val_full_cap <= 0) {
-        /* 读取失败，返回 0 */
         return 0;
     }
 
-    /* 读取剩余容量 */
     val_remaining = BQ40Z50_Read_RemainingCapacity();
     if (val_remaining < 0) {
-        /* 读取失败，返回 0 */
         return 0;
     }
 
-    /* 计算电量百分比（使用与周期上报相同的算法） */
     if (val_full_cap > MODIFY_FULL_CAP) {
-        /* 分母减去 MODIFY_FULL_CAP */
         percent = (int)((long long)val_remaining * 100LL /
                        ((long long)val_full_cap - MODIFY_FULL_CAP));
     } else {
-        /* 使用普通算法 */
         percent = (int)((long long)val_remaining * 100LL / (long long)val_full_cap);
     }
 
-    /* 限制在合理范围 */
     if (percent < 0) {
         percent = 0;
     } else if (percent > 100) {
         percent = 100;
     }
 
-    /* 判断是否在 0-3% 范围内 */
     if (percent >= 0 && percent <= 3) {
         return 1;
     } else {
         return 0;
     }
 }
-
